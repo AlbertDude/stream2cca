@@ -11,6 +11,7 @@ import logging
 import mutagen.easyid3  # pip3 install mutagen
 import pathlib
 import random
+import urllib
 
 
 # configure logging
@@ -169,12 +170,13 @@ class CcAudioStreamer():  # {
         return self.playlist
 
     # playback controls
-    def play(self, filename, mime_type='audio/mpeg', server='http://192.168.0.27:8000/',
+    # TODO: hardcoded IP address -- should auto-detect it
+    def play(self, filename, mime_type='audio/mpeg', server='http://192.168.0.44:8000/',
             verbose_listener=True):
         """
         """
         self.prev_filename = filename
-        url = server + filename
+        url = server + urllib.request.pathname2url(filename)
         logger.info("Play: %s" % url)
         self._prep_media_controller(verbose_listener=verbose_listener)
         ez = mutagen.easyid3.EasyID3(filename)
