@@ -9,6 +9,8 @@ import pychromecast as pycc     # req's 7.1.1:  pip install PyChromecast
 import time
 import logging
 import mutagen.easyid3  # pip3 install mutagen
+import pathlib
+import random
 
 
 # configure logging
@@ -16,7 +18,7 @@ import mutagen.easyid3  # pip3 install mutagen
 logging.basicConfig(
         #level=os.environ.get("LOGLEVEL", logging.INFO),
         format='%(asctime)s.%(msecs)03d:%(levelname)s:%(name)s: %(message)s',
-        datefmt='%m/%d.%H:%M:%S',
+        datefmt='%m/%d %H:%M:%S',
         )
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOGLEVEL", logging.INFO))
@@ -82,14 +84,16 @@ class CcAudioStreamer():  # {
         self.mc = None
         self.state = 'UNKNOWN'
         self.prev_playing_interrupted = datetime.datetime.now()
+        self.prev_filename = None
+        self.playlist = []
 
-    def _prep_media_controller(self, verbose_listener=True):
+    def _prep_media_controller(self, verbose_listener=False):
         """
         """
         self.verbose_listener = verbose_listener
         if self.mc is None:
             self.mc = self.cc.media_controller
-            self.mc.register_status_listener(self)
+            self.mc.register_status_listener(self)  # this registers the new_media_status() method
 
     def verbose_logger(self, msg):
         """
@@ -99,13 +103,18 @@ class CcAudioStreamer():  # {
 
     def new_media_status(self, status):
         """ status listener implementation
-            this is called by media controller
+            this method is called by media controller
+            - it is registered via the call: self.mc.register_status_listener(self)
         """
 
         if status is None or (status.player_state == 'IDLE' and status.idle_reason == 'FINISHED'):
             if self.state != 'IDLE':
                 self.verbose_logger("Status: FINISHED")
                 self.state = 'IDLE'
+                # playout the playlist if it exists
+                if self.playlist:
+                    self.play(self.playlist[0], verbose_listener = self.verbose_listener)
+                    del self.playlist[0]
         elif status.player_state == 'IDLE' and status.idle_reason == 'CANCELLED':
             if self.state != 'IDLE':
                 self.verbose_logger("Status: STOPPED")
@@ -134,8 +143,12 @@ class CcAudioStreamer():  # {
         elif status.player_state == 'PAUSED' and status.idle_reason == 'INTERRUPTED':
             self.verbose_logger("Status: PAUSED")
             self.state = 'PAUSED'
+        elif status.player_state == 'BUFFERING':
+            self.verbose_logger("Status: BUFFERING")
+            self.state = 'BUFFERING'
         else:
-            self.verbose_logger("Status: Spurious event: .player_state = %s, idle_reason = %s" % (status.player_state, status.idle_reason))
+            #self.verbose_logger("Status: Spurious event: .player_state = %s, idle_reason = %s" % (status.player_state, status.idle_reason))
+            pass
 
 #           try:
 #               next(self._media)
@@ -144,16 +157,27 @@ class CcAudioStreamer():  # {
 #               self.cc.quit_app()
 #               self.cc.__del__()
 
+    def play_list(self, filelist):
+        """
+        """
+        self.playlist = filelist[1:]
+        self.play(filelist[0], verbose_listener=False)
+
+    def get_playlist(self):
+        """
+        """
+        return self.playlist
 
     # playback controls
-    def play(self, filename, mime_type='audio/mpeg', server='http://192.168.0.27:8000/'):
+    def play(self, filename, mime_type='audio/mpeg', server='http://192.168.0.27:8000/',
+            verbose_listener=True):
         """
         """
+        self.prev_filename = filename
         url = server + filename
         logger.info("Play: %s" % url)
-        self._prep_media_controller()
-        rel_path = os.path.join('test_content', filename)
-        ez = mutagen.easyid3.EasyID3(rel_path)
+        self._prep_media_controller(verbose_listener=verbose_listener)
+        ez = mutagen.easyid3.EasyID3(filename)
         try:
             artist = ez['artist'][0]
         except:
@@ -172,14 +196,17 @@ class CcAudioStreamer():  # {
 
     def pause(self):
         logger.info("Pause: ")
+        self._prep_media_controller()
         self.mc.pause()
 
     def resume(self):
         logger.info("Resume: ")
+        self._prep_media_controller()
         self.mc.play()
 
     def stop(self):
         logger.info("Stop: ")
+        self._prep_media_controller()
         self.mc.stop()
 
 
@@ -210,7 +237,7 @@ class CcAudioStreamer():  # {
     def monitor_status(self):
         """
         """
-        self._prep_media_controller(verbose_listener=False)
+        self._prep_media_controller()
         prev_state = None
         while True:
             if self.state == 'PLAYING':
@@ -234,28 +261,6 @@ class CcAudioStreamer():  # {
 
 # }
 
-def get_devices():
-    """
-    """
-    print("Getting devices..")
-    # get chromecasts
-    ccs, browser = pycc.get_chromecasts()
-
-    # get audios
-    cc_audios = [cc for cc in ccs if cc.cast_type=='audio']
-
-    # get groups
-    cc_groups = [cc for cc in ccs if cc.cast_type=='group']
-
-    print("..done")
-    return cc_audios, cc_groups
-
-
-def wait_device_ready(cc):
-    """
-    """
-    cc.wait()
-
 
 def list_devices(cc_audios, cc_groups):
     """
@@ -270,13 +275,18 @@ def list_devices(cc_audios, cc_groups):
     for cca in cc_groups:
         print("  '%s' @ %s" % (cca.name, cca.host))
 
+# TODO: migrate the main app to be a while loop that accepts key commands:
+# s = stop
+# space = pause/resume
+# p = playfile
+# l = playlist
 
 def main(args): #{
     """
     """
 #   import pdb; pdb.set_trace()
 
-    cc_audios, cc_groups = get_devices()
+    cc_audios, cc_groups = CcAudioStreamer.get_devices()
 
     command = args.command_args[0].lower()
 
@@ -307,80 +317,75 @@ def main(args): #{
         print("Exitting")
         exit()
 
-    wait_device_ready(cc)
+    cas = CcAudioStreamer(cc)
 
     # volume commands
     if command == 'volup':
-        cur_vol = cc.status.volume_level
-        new_vol = min(cur_vol + 0.1, 1.0)
-        print("VolUp: Adjusting volume from %.2f -> %.2f" %(cur_vol, new_vol))
-        cc.set_volume(new_vol)
+        cas.vol_up()
         exit()
 
     if command == 'voldown':
-        cur_vol = cc.status.volume_level
-        new_vol = max(cur_vol - 0.1, 0)
-        print("VolDown: Adjusting volume from %.2f -> %.2f" %(cur_vol, new_vol))
-        cc.set_volume(new_vol)
+        cas.vol_down()
         exit()
 
     if command == 'setvol':
         assert len(args.command_args) == 2, "Need to specify volume value in range [0, 1.0]"
         new_vol = float(args.command_args[1])
-        print("SetVol: Setting volume to %.2f" %(new_vol))
-        cc.set_volume(new_vol)
+        cas.set_vol(new_vol)
         exit()
 
 
-    #
-    # media controller commands
-    #
-
-    mc = cc.media_controller
-    # TODO: KLUGE: checking for active session by looking for 'Casting' in the status_text
-    if 'Casting' not in cc.status.status_text:
-        print("No active session on the Chromecast device, exitting")
-        exit(1)
-
-    # only make the next call if there is an active session on the CC (otherwise it will block
-    # indefinitely)
-    mc.block_until_active(3) # required to "connect" the media controller to the CC session
-
+    # monitor status
     if command == 'status':
-        print("Active:", mc.is_active)
-        state = None
-        if mc.is_idle:
-            assert state is None
-            state = "Idle"
-        if mc.is_playing:
-            assert state is None
-            state = "Playing"
-        if mc.is_paused:
-            assert state is None
-            state = "Paused"
-        print("Idle/Playing/Paused:", state, "(%s)"%cc.status.status_text)
+        cas.monitor_status()
         exit()
 
-    # playback
-    if command == 'play':
+
+    # playback controls
+
+    # play folder
+    if command == 'playfolder':
+        assert len(args.command_args) == 2, "Need to specify folder to play"
+        folder = args.command_args[1]
+
+        posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
+        filelist = [str(pp) for pp in posixPath_list]
+        random.shuffle(filelist)
+        print("Playing playlist with %d files:" % len(filelist), filelist)
+        cas.play_list(filelist)
+        prev_len_playlist = 0
+        cur_playlist = cas.get_playlist()
+        while cur_playlist:
+            len_playlist = len(cur_playlist)
+            if len_playlist != prev_len_playlist:
+                logger.info("Remaining files in playlist: %d" % len_playlist)
+                prev_len_playlist = len_playlist
+            time.sleep(20)
+            cur_playlist = cas.get_playlist()
+
+    # play single file
+    if command == 'playfile':
         assert len(args.command_args) == 2, "Need to specify filename to play"
+        filename = args.command_args[1]
+        assert os.path.isfile(filename)
+        cas.play(filename)
         exit()
 
     if command == 'pause':
-        mc.pause()
+        cas.pause()
         exit()
 
     if command == 'resume':
-        mc.play()
+        cas.resume()
         exit()
 
     if command == 'stop':
-        mc.stop()
+        cas.stop()
         exit()
 
-
-    import pdb; pdb.set_trace()
-
+    # Unknown command
+    print("Unknown command: %s" % command)
+    exit()
 
 #}
 
@@ -388,7 +393,7 @@ def main(args): #{
 if __name__ == '__main__': #{
     parser = argparse.ArgumentParser(description='Stream Audio to Chromecast (Audio)')
 
-    parser.add_argument( "command_args", help="[list|status|play file|pause|resume|stop|volup|voldown|setvol v]", nargs="+" )
+    parser.add_argument( "command_args", help="[list|status|playfile file|playfolder folder|pause|resume|stop|volup|voldown|setvol v]", nargs="+" )
 #   parser.add_argument( "output_folder", help="folder to place test results" )
 #   parser.add_argument( '-l', '--list_devices', action="store_true", dest='list_devices',
 #                   default=False, help='list CC audio and group devices' )
@@ -459,7 +464,7 @@ def test2():
         cas = CcAudioStreamer(cc_audios[0])
         cas.set_vol(0.3)
         cas.play("Baby.30.mp3")
-        time.sleep(35)
+        time.sleep(65)
 
 def test3():
     """
@@ -488,6 +493,22 @@ def test3():
         time.sleep(10)
         cas.stop()
         time.sleep(5)
+
+def test4():
+    """
+        Play list of files
+    """
+    print()
+
+    cc_audios, cc_groups = CcAudioStreamer.get_devices()
+    print("AUDIOS:", cc_audios)
+    print("GROUPS:", cc_groups)
+
+    if cc_audios:
+        cas = CcAudioStreamer(cc_audios[0])
+        cas.set_vol(0.3)
+        cas.play_list(["StayHigh.mp3", "ShortAndSweet.mp3", "Baby.mp3"])
+        time.sleep(600)
 
 
 
