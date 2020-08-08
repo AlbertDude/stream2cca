@@ -11,6 +11,7 @@ import logging
 import mutagen.easyid3  # pip3 install mutagen
 import pathlib
 import random
+import socket
 import urllib
 
 
@@ -27,6 +28,19 @@ logger.setLevel(os.environ.get("LOGLEVEL", logging.INFO))
 
 # helpers
 #
+
+
+def get_ip_address():
+    """ returns the machines local ip address
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # doesn't even have to be reachable
+    s.connect(('10.255.255.255', 1))
+    ip_address = s.getsockname()[0]
+    s.close()
+    return ip_address
+
+IP_ADDRESS = get_ip_address()
 
 def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
@@ -171,7 +185,9 @@ class CcAudioStreamer():  # {
 
     # playback controls
     # TODO: hardcoded IP address -- should auto-detect it
-    def play(self, filename, mime_type='audio/mpeg', server='http://192.168.0.44:8000/',
+    def play(self, filename, mime_type='audio/mpeg',
+#           server='http://192.168.0.44:8000/',
+            server='http://' + IP_ADDRESS + ':8000/',
             verbose_listener=True):
         """
         """
@@ -521,25 +537,6 @@ def test4():
 # basically start simple http server from folder with the files:
 #    python3 -m http.server
 # can do this on the pi4...
-
-mc.play_media("http://192.168.0.27:8000/Baby.mp3", content_type = "audio/mp3", title="artist - Baby")
-# above starts playing immediately
-
-# tried passing a .m3u playlist file, couldn't get it working
-#   - tried listing bare file names as well as http://192.168.0.27:8000/x.mp3 in the .m3u file
-#   - also tried the different content_types:
-#   (Pdb) mc.play_media("http://192.168.0.27:8000/list.m3u", content_type="application/mpegurl")
-#   (Pdb) mc.play_media("http://192.168.0.27:8000/list.m3u", content_type="application/x-mpegurl")
-#   (Pdb) mc.play_media("http://192.168.0.27:8000/list.m3u", content_type="audio/mpegurl")
-#   (Pdb) mc.play_media("http://192.168.0.27:8000/list.m3u", content_type="audio/x-mpegurl")
-
-# not sure what the lines below do...
-mc.block_until_active()
-mc.play()
-
-
-# TODO: how tell when file is done?
-#
 
 """
 
