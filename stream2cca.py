@@ -71,7 +71,6 @@ class CcAudioStreamer():  # {
     """ Chromecast audio streamer
 
         TODO:
-        - detect when media finished
         - implement state machine (IDLE, PLAYING, PAUSED)?
     """
     @staticmethod
@@ -184,9 +183,7 @@ class CcAudioStreamer():  # {
         return self.playlist
 
     # playback controls
-    # TODO: hardcoded IP address -- should auto-detect it
     def play(self, filename, mime_type='audio/mpeg',
-#           server='http://192.168.0.44:8000/',
             server='http://' + IP_ADDRESS + ':8000/',
             verbose_listener=True):
         """
@@ -286,12 +283,12 @@ def list_devices(cc_audios, cc_groups):
     # print audios
     print("Found %d Chromecast Audio devices:" % len(cc_audios))
     for cca in cc_audios:
-        print("  '%s' @ %s" % (cca.name, cca.host))
+        print("  '%s' (%s)" % (cca.name, cca.model_name))
 
     # print groups
     print("Found %d Chromecast Group devices:" % len(cc_groups))
     for cca in cc_groups:
-        print("  '%s' @ %s" % (cca.name, cca.host))
+        print("  '%s' (%s)" % (cca.name, cca.model_name))
 
 # TODO: migrate the main app to be a while loop that accepts key commands:
 # s = stop
