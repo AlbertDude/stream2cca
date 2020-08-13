@@ -21,7 +21,9 @@ Dependencies
 ------------
 
 - pychromecast
+    - pip install PyChromecast
 - mutagen
+    - pip install mutagen
 
 
 How to use

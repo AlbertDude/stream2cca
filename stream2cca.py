@@ -4,14 +4,14 @@ stream audio to Chromecast Audio
 """
 import argparse
 import datetime
-import os
-import pychromecast as pycc     # req's 7.1.1:  pip install PyChromecast
-import time
 import logging
 import mutagen.easyid3  # pip3 install mutagen
+import os
 import pathlib
+import pychromecast as pycc     # req's 7.1.1:  pip install PyChromecast
 import random
 import socket
+import time
 import urllib
 
 
@@ -69,9 +69,6 @@ def clear_line():
 
 class CcAudioStreamer():  # {
     """ Chromecast audio streamer
-
-        TODO:
-        - implement state machine (IDLE, PLAYING, PAUSED)?
     """
     @staticmethod
     def get_devices():
@@ -154,7 +151,7 @@ class CcAudioStreamer():  # {
             else:
                 self.verbose_logger("Status: Spurious PLAYING/INTERRUPTED")
             self.state = 'PLAYING'
-        elif status.player_state == 'PAUSED' and status.idle_reason == 'INTERRUPTED':
+        elif status.player_state == 'PAUSED':
             self.verbose_logger("Status: PAUSED")
             self.state = 'PAUSED'
         elif status.player_state == 'BUFFERING':
@@ -171,11 +168,11 @@ class CcAudioStreamer():  # {
 #               self.cc.quit_app()
 #               self.cc.__del__()
 
-    def play_list(self, filelist):
+    def play_list(self, filelist, verbose_listener=False):
         """
         """
         self.playlist = filelist[1:]
-        self.play(filelist[0], verbose_listener=False)
+        self.play(filelist[0], verbose_listener=verbose_listener)
 
     def get_playlist(self):
         """
@@ -218,6 +215,14 @@ class CcAudioStreamer():  # {
         logger.info("Resume: ")
         self._prep_media_controller()
         self.mc.play()
+
+    def toggle_pause(self):
+        """ toggles between pause and resume
+        """
+        if self.state == 'PLAYING':
+            self.pause()
+        elif self.state == 'PAUSED':
+            self.resume()
 
     def stop(self):
         logger.info("Stop: ")
@@ -296,111 +301,245 @@ def list_devices(cc_audios, cc_groups):
 # p = playfile
 # l = playlist
 
-def main(args): #{
+
+"""
+
+"""
+
+import sys
+import select
+import tty
+import termios
+class NonBlockingConsole():
     """
+        Taken from: https://stackoverflow.com/questions/2408560/python-nonblocking-console-input
     """
-#   import pdb; pdb.set_trace()
+
+    def __enter__(self):
+        self.old_settings = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        return self
+
+    def __exit__(self, type, value, traceback):
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+
+
+    def get_data(self):
+        if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+            return sys.stdin.read(1)
+        return False
+
+def loop_NBC():
+    print(inspect.currentframe().f_code.co_name)
+
+    with NonBlockingConsole() as nbc:
+        while True:
+            k = nbc.get_data()
+
+            # quit: q, <ESC>
+            if k == '' or k == 'q':
+                break
+
+            # toggle pause/resume: <space>
+            elif k == ' ':
+                print("<SPACE>")
+                if cas:
+                    cas.toggle_pause()
+
+            # unused:
+            elif k:
+                print('Unmapped key pressed:', k)
+
+
+def interactive_mode():  # {
+    """
+    NOTE: initially tried using pynput, but had these issues:
+      - pynput does not work on RPI over SSH -- presumably problem is trying to run over SSH
+        - just trying to `import pynput` results in error
+      - pynput run locally on Mac grabs ALL keypresses, even those intended for different window/app
+    """
+
+    cas = None
 
     cc_audios, cc_groups = CcAudioStreamer.get_devices()
+    ccs = cc_audios + cc_groups
+    assert ccs, "No Chromecasts"
+    if len(ccs) > 10:
+        # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
+        logger.warn("More than 10 Chromecast devices, only able to select up to 10")
 
-    command = args.command_args[0].lower()
+    digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
+    cc_selectors = digits[:len(ccs)]
 
-    if command == 'list':
-        list_devices(cc_audios, cc_groups)
-        exit()
+    # display key mappings
+    print("-"*66)
+    for i, cc in zip(cc_selectors, ccs):
+        print(i, "=", cc.name, "(%s)" % cc.model_name)
+    print("+ = volume up")
+    print("- = volume up")
+    print("p = playfolder")
+    print("<SPACE> = pause/resume")
+    print("q = quit")
+    print("-"*66)
 
-    # set cc device
-    if len(cc_audios) == 0 and len(cc_groups) == 0:
-        print("No audio or group chromecast devices, exitting")
-        exit()
-    cc = None
-    if args.devicename == None:
-        if len(cc_audios) > 0:
-            cc = cc_audios[0]
-        else:
-            cc = cc_groups[0]
-        print("Defaulting to device ('%s')" % cc.name)
-    else:
-        for check in cc_audios + cc_groups:
-            if check.name == args.devicename:
-                cc = check
+    # main loop
+    with NonBlockingConsole() as nbc:
+        while True:  # {
+            k = nbc.get_data()  # returns False if no data
+            if not k:
+                continue
+
+            # quit: q, <ESC>
+            if k == '' or k == 'q':
                 break
-    if cc is None:
-        print("Unable to locate specified device ('%s'), exitting" % args.devicename)
-        print("Available devices:")
-        list_devices(cc_audios, cc_groups)
-        print("Exitting")
-        exit()
 
-    cas = CcAudioStreamer(cc)
+            # select CC: 0, 1, ...
+            if k in cc_selectors:
+                cc  = ccs[int(k)]
+                cas = CcAudioStreamer(cc)
+                print("selected:", cc.name, "(%s)"%cc.model_name)
 
-    # volume commands
-    if command == 'volup':
-        cas.vol_up()
-        exit()
+            # vol up & down
+            elif k == '+':
+                if cas:
+                    cas.vol_up(0.05)
+            elif k == '-':
+                if cas:
+                    cas.vol_down(0.05)
 
-    if command == 'voldown':
-        cas.vol_down()
-        exit()
+            # toggle pause/resume: <space>
+            elif k == ' ':
+                if cas:
+                    cas.toggle_pause()
 
-    if command == 'setvol':
-        assert len(args.command_args) == 2, "Need to specify volume value in range [0, 1.0]"
-        new_vol = float(args.command_args[1])
-        cas.set_vol(new_vol)
-        exit()
+            # play folder: p
+            elif k == 'p':
+                if cas:
+                    folder = "test_content"     # TODO:
+                    posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
+                    filelist = [str(pp) for pp in posixPath_list]
+                    random.shuffle(filelist)
+                    print("Playing playlist with %d files:" % len(filelist), filelist)
+                    cas.play_list(filelist)
+
+            # unused:
+            else:
+                print('Unmapped key pressed:', k)
+        # }
+# }
 
 
-    # monitor status
-    if command == 'status':
-        cas.monitor_status()
-        exit()
+def main(args):  # {
+    """
+    """
+
+    if len(args.command_args) == 0:
+        interactive_mode()
+
+    else:  # {
+        # CLI commands
+
+        command = args.command_args[0].lower()
+
+        cc_audios, cc_groups = CcAudioStreamer.get_devices()
+
+        if command == 'list':
+            list_devices(cc_audios, cc_groups)
+            exit()
+
+        # set cc device
+        if len(cc_audios) == 0 and len(cc_groups) == 0:
+            print("No audio or group chromecast devices, exitting")
+            exit()
+        cc = None
+        if args.devicename == None:
+            if len(cc_audios) > 0:
+                cc = cc_audios[0]
+            else:
+                cc = cc_groups[0]
+            print("Defaulting to device ('%s')" % cc.name)
+        else:
+            for check in cc_audios + cc_groups:
+                if check.name == args.devicename:
+                    cc = check
+                    break
+        if cc is None:
+            print("Unable to locate specified device ('%s'), exitting" % args.devicename)
+            print("Available devices:")
+            list_devices(cc_audios, cc_groups)
+            print("Exitting")
+            exit()
+
+        cas = CcAudioStreamer(cc)
+
+        # volume commands
+        if command == 'volup':
+            cas.vol_up()
+            exit()
+
+        if command == 'voldown':
+            cas.vol_down()
+            exit()
+
+        if command == 'setvol':
+            assert len(args.command_args) == 2, "Need to specify volume value in range [0, 1.0]"
+            new_vol = float(args.command_args[1])
+            cas.set_vol(new_vol)
+            exit()
 
 
-    # playback controls
+        # monitor status
+        if command == 'status':
+            cas.monitor_status()
+            exit()
 
-    # play folder
-    if command == 'playfolder':
-        assert len(args.command_args) == 2, "Need to specify folder to play"
-        folder = args.command_args[1]
 
-        posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
-        filelist = [str(pp) for pp in posixPath_list]
-        random.shuffle(filelist)
-        print("Playing playlist with %d files:" % len(filelist), filelist)
-        cas.play_list(filelist)
-        prev_len_playlist = 0
-        cur_playlist = cas.get_playlist()
-        while cur_playlist:
-            len_playlist = len(cur_playlist)
-            if len_playlist != prev_len_playlist:
-                logger.info("Remaining files in playlist: %d" % len_playlist)
-                prev_len_playlist = len_playlist
-            time.sleep(20)
+        # playback controls
+
+        # play folder
+        if command == 'playfolder':
+            assert len(args.command_args) == 2, "Need to specify folder to play"
+            folder = args.command_args[1]
+
+            posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
+            filelist = [str(pp) for pp in posixPath_list]
+            random.shuffle(filelist)
+            print("Playing playlist with %d files:" % len(filelist), filelist)
+            cas.play_list(filelist)
+            prev_len_playlist = 0
             cur_playlist = cas.get_playlist()
+            while cur_playlist:
+                len_playlist = len(cur_playlist)
+                if len_playlist != prev_len_playlist:
+                    logger.info("Remaining files in playlist: %d" % len_playlist)
+                    prev_len_playlist = len_playlist
+                time.sleep(20)
+                cur_playlist = cas.get_playlist()
 
-    # play single file
-    if command == 'playfile':
-        assert len(args.command_args) == 2, "Need to specify filename to play"
-        filename = args.command_args[1]
-        assert os.path.isfile(filename)
-        cas.play(filename)
+        # play single file
+        if command == 'playfile':
+            assert len(args.command_args) == 2, "Need to specify filename to play"
+            filename = args.command_args[1]
+            assert os.path.isfile(filename)
+            cas.play(filename)
+            exit()
+
+        if command == 'pause':
+            cas.pause()
+            exit()
+
+        if command == 'resume':
+            cas.resume()
+            exit()
+
+        if command == 'stop':
+            cas.stop()
+            exit()
+
+        # Unknown command
+        print("Unknown command: %s" % command)
         exit()
-
-    if command == 'pause':
-        cas.pause()
-        exit()
-
-    if command == 'resume':
-        cas.resume()
-        exit()
-
-    if command == 'stop':
-        cas.stop()
-        exit()
-
-    # Unknown command
-    print("Unknown command: %s" % command)
-    exit()
+    # }
 
 #}
 
@@ -408,7 +547,7 @@ def main(args): #{
 if __name__ == '__main__': #{
     parser = argparse.ArgumentParser(description='Stream Audio to Chromecast (Audio)')
 
-    parser.add_argument( "command_args", help="[list|status|playfile file|playfolder folder|pause|resume|stop|volup|voldown|setvol v]", nargs="+" )
+    parser.add_argument( "command_args", help="[list|status|playfile file|playfolder folder|pause|resume|stop|volup|voldown|setvol v]", nargs="*" )
 #   parser.add_argument( "output_folder", help="folder to place test results" )
 #   parser.add_argument( '-l', '--list_devices', action="store_true", dest='list_devices',
 #                   default=False, help='list CC audio and group devices' )
