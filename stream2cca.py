@@ -97,6 +97,7 @@ class CcAudioStreamer():  # {
         self.prev_playing_interrupted = datetime.datetime.now()
         self.prev_filename = None
         self.playlist = []
+        self.playlist_index = None
 
     def _prep_media_controller(self, verbose_listener=False):
         """
@@ -112,6 +113,18 @@ class CcAudioStreamer():  # {
         if self.verbose_listener:
             logger.info(msg)
 
+    def incr_playlist_index(self):
+        if not self.playlist_index is None:
+            self.playlist_index += 1
+            if self.playlist_index >= len(self.playlist):
+                self.playlist_index = 0
+
+    def decr_playlist_index(self):
+        if not self.playlist_index is None:
+            self.playlist_index -= 1
+            if self.playlist_index < 0:
+                self.playlist_index = len(self.playlist) - 1
+
     def new_media_status(self, status):
         """ status listener implementation
             this method is called by media controller
@@ -124,8 +137,8 @@ class CcAudioStreamer():  # {
                 self.state = 'IDLE'
                 # playout the playlist if it exists
                 if self.playlist:
-                    self.play(self.playlist[0], verbose_listener = self.verbose_listener)
-                    del self.playlist[0]
+                    self.incr_playlist_index()
+                    self.play(self.playlist[self.playlist_index], verbose_listener = self.verbose_listener)
         elif status.player_state == 'IDLE' and status.idle_reason == 'CANCELLED':
             if self.state != 'IDLE':
                 self.verbose_logger("Status: STOPPED")
@@ -171,13 +184,24 @@ class CcAudioStreamer():  # {
     def play_list(self, filelist, verbose_listener=False):
         """
         """
-        self.playlist = filelist[1:]
-        self.play(filelist[0], verbose_listener=verbose_listener)
+        self.playlist = filelist
+        self.playlist_index = 0
+        self.play(self.playlist[self.playlist_index], verbose_listener=verbose_listener)
 
     def get_playlist(self):
         """
         """
         return self.playlist
+
+    def get_playlist_index(self):
+        """
+        """
+        return self.playlist_index
+
+    def get_playlist_current_file(self):
+        """
+        """
+        return self.playlist[self.playlist_index]
 
     # playback controls
     def play(self, filename, mime_type='audio/mpeg',
@@ -205,6 +229,14 @@ class CcAudioStreamer():  # {
         metadata = {'artist': artist, 'title': title, 'albumName': album}
         self.mc.play_media(url, mime_type, metadata=metadata)
         self.mc.block_until_active(3) # required to "connect" the media controller to the CC session
+
+    def next_track(self):
+        self.incr_playlist_index()
+        self.play(self.playlist[self.playlist_index], verbose_listener=False)
+
+    def prev_track(self):
+        self.decr_playlist_index()
+        self.play(self.playlist[self.playlist_index], verbose_listener=False)
 
     def pause(self):
         logger.info("Pause: ")
@@ -295,16 +327,6 @@ def list_devices(cc_audios, cc_groups):
     for cca in cc_groups:
         print("  '%s' (%s)" % (cca.name, cca.model_name))
 
-# TODO: migrate the main app to be a while loop that accepts key commands:
-# s = stop
-# space = pause/resume
-# p = playfile
-# l = playlist
-
-
-"""
-
-"""
 
 import sys
 import select
@@ -328,27 +350,6 @@ class NonBlockingConsole():
         if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
             return sys.stdin.read(1)
         return False
-
-def loop_NBC():
-    print(inspect.currentframe().f_code.co_name)
-
-    with NonBlockingConsole() as nbc:
-        while True:
-            k = nbc.get_data()
-
-            # quit: q, <ESC>
-            if k == '' or k == 'q':
-                break
-
-            # toggle pause/resume: <space>
-            elif k == ' ':
-                print("<SPACE>")
-                if cas:
-                    cas.toggle_pause()
-
-            # unused:
-            elif k:
-                print('Unmapped key pressed:', k)
 
 
 def interactive_mode():  # {
@@ -376,9 +377,11 @@ def interactive_mode():  # {
     for i, cc in zip(cc_selectors, ccs):
         print(i, "=", cc.name, "(%s)" % cc.model_name)
     print("+ = volume up")
-    print("- = volume up")
+    print("- = volume down")
     print("p = playfolder")
     print("<SPACE> = pause/resume")
+    print("> = next track")
+    print("< = previous track")
     print("q = quit")
     print("-"*66)
 
@@ -421,6 +424,14 @@ def interactive_mode():  # {
                     random.shuffle(filelist)
                     print("Playing playlist with %d files:" % len(filelist), filelist)
                     cas.play_list(filelist)
+
+            # next & prev track
+            elif k == '>' or k == '.':
+                if cas:
+                    cas.next_track()
+            elif k == '<' or k == ',':
+                if cas:
+                    cas.prev_track()
 
             # unused:
             else:
