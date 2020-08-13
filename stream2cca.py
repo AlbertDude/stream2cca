@@ -388,6 +388,10 @@ def interactive_mode():  # {
     # main loop
     with NonBlockingConsole() as nbc:
         while True:  # {
+            # Throttle the polling loop so python doesn't consume 100% of a core
+            # - this reduces CPU to < 1% on Mac
+            time.sleep(1/60)
+
             k = nbc.get_data()  # returns False if no data
             if not k:
                 continue
