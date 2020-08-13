@@ -8,23 +8,41 @@ import logging
 import mutagen.easyid3  # pip3 install mutagen
 import os
 import pathlib
-import pychromecast as pycc     # req's 7.1.1:  pip install PyChromecast
+import pychromecast as pycc     # pip install PyChromecast==7.2.0  ## Other versions may work also
 import random
 import socket
+import threading
 import time
 import urllib
 
 
 # configure logging
 
-logging.basicConfig(
-        #level=os.environ.get("LOGLEVEL", logging.INFO),
-        format='%(asctime)s.%(msecs)03d:%(levelname)s:%(name)s: %(message)s',
-        datefmt='%m/%d %H:%M:%S',
-        )
+#   logging.basicConfig(
+#           #level=os.environ.get("LOGLEVEL", logging.INFO),
+#           format='%(asctime)s.%(msecs)03d:%(levelname)s:%(name)s: %(message)s',
+#           datefmt='%m/%d %H:%M:%S',
+#           )
+
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOGLEVEL", logging.INFO))
 
+logging_formatter = logging.Formatter(
+        '%(asctime)s.%(msecs)03d:%(levelname)s:%(name)s: %(message)s',
+        datefmt='%m/%d %H:%M:%S',
+        )
+
+# log to file
+logging_fh = logging.FileHandler('s2c.log', mode='w')
+logging_fh.setFormatter(logging_formatter)
+logging_fh.setLevel(logging.INFO)
+logger.addHandler(logging_fh)
+
+# log warnings to console screen
+logging_ch = logging.StreamHandler()
+logging_ch.setFormatter(logging_formatter)
+logging_ch.setLevel(logging.WARN)
+logger.addHandler(logging_ch)
 
 # helpers
 #
@@ -335,6 +353,11 @@ import termios
 class NonBlockingConsole():
     """
         Taken from: https://stackoverflow.com/questions/2408560/python-nonblocking-console-input
+
+        NOTE: initially tried using pynput for keypress detection, but had these issues:
+          - pynput does not work on RPI over SSH -- presumably problem is trying to run over SSH
+            - just trying to `import pynput` results in error
+          - pynput run locally on Mac grabs ALL keypresses, even those intended for different window/app
     """
 
     def __enter__(self):
@@ -345,19 +368,33 @@ class NonBlockingConsole():
     def __exit__(self, type, value, traceback):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
 
-
     def get_data(self):
         if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
             return sys.stdin.read(1)
         return False
 
 
+import http.server
+import socketserver
+class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    """ Subclass to redirect log_message to logger (rather than screen)
+    """
+    def log_message(self, format, *args):
+        logger.info(format % args)
+
+PORT = 8000
+handler = MyHTTPRequestHandler
+server = socketserver.ThreadingTCPServer(("", PORT), handler)
+
+def simple_threaded_server():
+    server_thread = threading.Thread(target=server.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
+    logger.info("Started simple server at port: %s" % PORT)
+
+
 def interactive_mode():  # {
     """
-    NOTE: initially tried using pynput, but had these issues:
-      - pynput does not work on RPI over SSH -- presumably problem is trying to run over SSH
-        - just trying to `import pynput` results in error
-      - pynput run locally on Mac grabs ALL keypresses, even those intended for different window/app
     """
 
     cas = None
@@ -367,23 +404,36 @@ def interactive_mode():  # {
     assert ccs, "No Chromecasts"
     if len(ccs) > 10:
         # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
-        logger.warn("More than 10 Chromecast devices, only able to select up to 10")
+        logger.warning("More than 10 Chromecast devices, only able to select up to 10")
+
+    # startup server
+    simple_threaded_server()
 
     digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
     cc_selectors = digits[:len(ccs)]
 
-    # display key mappings
-    print("-"*66)
-    for i, cc in zip(cc_selectors, ccs):
-        print(i, "=", cc.name, "(%s)" % cc.model_name)
-    print("+ = volume up")
-    print("- = volume down")
-    print("p = playfolder")
-    print("<SPACE> = pause/resume")
-    print("> = next track")
-    print("< = previous track")
-    print("q = quit")
-    print("-"*66)
+    # show key mappings
+    def show_key_mappings():  # {
+
+        def print_mapping(keys, descr):
+            print("%s = %s" % (keys.center(7), descr))
+
+        divider = "-"*66
+        print(divider)
+        print("Devices:")
+        for i, cc in zip(cc_selectors, ccs):
+            print("",i, "=", cc.name, "(%s)" % cc.model_name)
+        print()
+        print_mapping('- +', 'volume down/up')
+        print_mapping('p', 'playfolder')
+        print_mapping(',< >.', 'previous/next track')
+        print_mapping('<SPACE>', 'pause/resume')
+        print_mapping('q', 'quit')
+        print_mapping('?', 'show key mappings')
+        print(divider)
+    # }
+
+    show_key_mappings()
 
     # main loop
     with NonBlockingConsole() as nbc:
@@ -396,8 +446,11 @@ def interactive_mode():  # {
             if not k:
                 continue
 
-            # quit: q, <ESC>
-            if k == '' or k == 'q':
+            # quit: q   ##, <ESC>
+            #if k == chr(27) or k == 'q':   ## testing for <ESC> also triggered by cursor keys
+            if k == 'q':
+                server.shutdown()
+                print("Quitting")
                 break
 
             # select CC: 0, 1, ...
@@ -436,6 +489,9 @@ def interactive_mode():  # {
             elif k == '<' or k == ',':
                 if cas:
                     cas.prev_track()
+
+            elif k == '?':
+                show_key_mappings()
 
             # unused:
             else:
