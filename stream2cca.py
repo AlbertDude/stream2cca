@@ -439,30 +439,24 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         print("do_POST!!")
 
 
-# TODO: look into proper way to shutdown this server
-# - think it's not being done properly resulting in this occasional error when q and then restart
-#   - eventually able to restart OK by just trying again
-"""
-Traceback (most recent call last):
-  File "./stream2cca.py", line 723, in <module>
-    main(args)
-  File "./stream2cca.py", line 601, in main
-    interactive_mode(playlist_folder)
-  File "./stream2cca.py", line 472, in interactive_mode
-    my_server = socketserver.ThreadingTCPServer(("", PORT), handler)
-  File "/usr/local/Cellar/python@3.8/3.8.3_2/Frameworks/Python.framework/Versions/3.8/lib/python3.8/socketserver.py", line 452, in __init__
-    self.server_bind()
-  File "/usr/local/Cellar/python@3.8/3.8.3_2/Frameworks/Python.framework/Versions/3.8/lib/python3.8/socketserver.py", line 466, in server_bind
-    self.socket.bind(self.server_address)
-OSError: [Errno 48] Address already in use
-"""
-
-
 def simple_threaded_server(server):
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
     logger.info("Started simple server at port: %s" % PORT)
+
+class MyThreadingTCPServer(socketserver.ThreadingTCPServer):
+    """
+    Attempt to address this occasional error when quit and restart server
+        OSError: [Errno 48] Address already in use
+    See: https://stackoverflow.com/questions/6380057/python-binding-socket-address-already-in-use/18858817#18858817
+
+    Seems to work on Mac
+    TODO: test on RPi4
+    """
+    def server_bind(self):
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(self.server_address)
 
 def interactive_print(*args, **kwargs):
     clear_line = kwargs.pop('clear_line', False)
@@ -488,7 +482,7 @@ def interactive_mode(playlist_folder):  # {
 
     # startup server
     handler = MyHTTPRequestHandler
-    my_server = socketserver.ThreadingTCPServer(("", PORT), handler)
+    my_server = MyThreadingTCPServer(("", PORT), handler)
     simple_threaded_server(my_server)
 
     digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
@@ -540,7 +534,8 @@ def interactive_mode(playlist_folder):  # {
             # Throttle the polling loop so python doesn't consume 100% of a core
             # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
             # - running @ 30Hz reduces CPU to ~ 7% on RPi4
-            time.sleep(1/30)
+            # - running @ 20Hz reduces CPU to ~ 5% on RPi4
+            time.sleep(1/20)
 
             k = nbc.get_data()  # returns False if no data
             if not k:
