@@ -439,6 +439,25 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         print("do_POST!!")
 
 
+# TODO: look into proper way to shutdown this server
+# - think it's not being done properly resulting in this occasional error when q and then restart
+#   - eventually able to restart OK by just trying again
+"""
+Traceback (most recent call last):
+  File "./stream2cca.py", line 723, in <module>
+    main(args)
+  File "./stream2cca.py", line 601, in main
+    interactive_mode(playlist_folder)
+  File "./stream2cca.py", line 472, in interactive_mode
+    my_server = socketserver.ThreadingTCPServer(("", PORT), handler)
+  File "/usr/local/Cellar/python@3.8/3.8.3_2/Frameworks/Python.framework/Versions/3.8/lib/python3.8/socketserver.py", line 452, in __init__
+    self.server_bind()
+  File "/usr/local/Cellar/python@3.8/3.8.3_2/Frameworks/Python.framework/Versions/3.8/lib/python3.8/socketserver.py", line 466, in server_bind
+    self.socket.bind(self.server_address)
+OSError: [Errno 48] Address already in use
+"""
+
+
 def simple_threaded_server(server):
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
@@ -454,7 +473,7 @@ def interactive_print(*args, **kwargs):
         print()
     print(" ".join(map(str, args)), **kwargs)
 
-def interactive_mode():  # {
+def interactive_mode(playlist_folder):  # {
     """
     """
 
@@ -519,8 +538,9 @@ def interactive_mode():  # {
             print("%s \r" % status, end='')
 
             # Throttle the polling loop so python doesn't consume 100% of a core
-            # - this reduces CPU to < 1% on Mac
-            time.sleep(1/60)
+            # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
+            # - running @ 30Hz reduces CPU to ~ 7% on RPi4
+            time.sleep(1/30)
 
             k = nbc.get_data()  # returns False if no data
             if not k:
@@ -558,18 +578,20 @@ def interactive_mode():  # {
             # play folder: p
             elif k == 'p':
                 if cas:
-                    folder = "test_content"     # TODO:
-                    posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
-                    filelist = [str(pp) for pp in posixPath_list]
-                    random.shuffle(filelist)
-                    print("Playing playlist with %d files: [" % len(filelist), end="")
-                    max_files_to_print = 3
-                    for i in range(min(max_files_to_print, len(filelist))):
-                        print("%s, " % os.path.basename(filelist[i]), end="")
-                    if len(filelist) > max_files_to_print:
-                        print("...]")
+                    posixPath_list = list(pathlib.Path(playlist_folder).rglob("*.[mM][pP]3"))
+                    if posixPath_list:
+                        filelist = [str(pp) for pp in posixPath_list]
+                        random.shuffle(filelist)
+                        print("Playing playlist folder (%s) with %d files: [" % (playlist_folder, len(filelist)), end="")
+                        max_files_to_print = 3
+                        for i in range(min(max_files_to_print, len(filelist))):
+                            print("%s, " % os.path.basename(filelist[i]), end="")
+                        if len(filelist) > max_files_to_print:
+                            print("...]")
 
-                    cas.play_list(filelist)
+                        cas.play_list(filelist)
+                    else:
+                        print("No files found under playlist folder: %s" % (playlist_folder))
 
             # next & prev track
             elif k == '>' or k == '.':
@@ -595,9 +617,10 @@ def interactive_mode():  # {
 def main(args):  # {
     """
     """
+    playlist_folder = args.folder
 
     if len(args.command_args) == 0:
-        interactive_mode()
+        interactive_mode(playlist_folder)
 
     else:  # {
         # CLI commands
@@ -661,10 +684,7 @@ def main(args):  # {
 
         # play folder
         if command == 'playfolder':
-            assert len(args.command_args) == 2, "Need to specify folder to play"
-            folder = args.command_args[1]
-
-            posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
+            posixPath_list = list(pathlib.Path(playlist_folder).rglob("*.[mM][pP]3"))
             filelist = [str(pp) for pp in posixPath_list]
             random.shuffle(filelist)
             print("Playing playlist with %d files:" % len(filelist), filelist)
@@ -710,12 +730,14 @@ def main(args):  # {
 if __name__ == '__main__': #{
     parser = argparse.ArgumentParser(description='Stream Audio to Chromecast (Audio)')
 
-    parser.add_argument( "command_args", help="[list|status|playfile file|playfolder folder|pause|resume|stop|volup|voldown|setvol v]", nargs="*" )
-#   parser.add_argument( "output_folder", help="folder to place test results" )
+    parser.add_argument( "command_args", help="[list|status|playfile file|playfolder|pause|resume|stop|volup|voldown|setvol v]", nargs="*" )
 #   parser.add_argument( '-l', '--list_devices', action="store_true", dest='list_devices',
 #                   default=False, help='list CC audio and group devices' )
     parser.add_argument( '-d', '--devicename',
                     help='specify device (default is first audio device' )
+    DEFAULT_FOLDER = 'ZPL'
+    parser.add_argument( '-f', '--folder',
+                    help='specify folder path to play (default="%s")' % DEFAULT_FOLDER, default=DEFAULT_FOLDER )
 #   parser.add_argument( '-p', '--perception_only', action="store_false", dest='pnnf_input_files',
 #                   default=True, help='skip generation of #pnnf_input.dat files' )
 
