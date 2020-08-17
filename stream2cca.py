@@ -44,6 +44,11 @@ logging_ch.setFormatter(logging_formatter)
 logging_ch.setLevel(logging.WARN)
 logger.addHandler(logging_ch)
 
+
+# Network port to use
+PORT = 8000
+
+
 # helpers
 #
 
@@ -79,7 +84,7 @@ def to_min_sec(seconds, resolution="seconds"):
         # default to "seconds"
         return '%02d:%02d' % (mins, secs)
 
-def clear_line():
+def _clear_line():
     """ clears line and places cursor back to start of the line
     """
     print(" " * 100 + "\r", end='')
@@ -116,6 +121,9 @@ class CcAudioStreamer():  # {
         self.prev_filename = None
         self.playlist = []
         self.playlist_index = None
+
+    def get_name(self):
+        return self.cc.name
 
     def _prep_media_controller(self, verbose_listener=False):
         """
@@ -223,7 +231,7 @@ class CcAudioStreamer():  # {
 
     # playback controls
     def play(self, filename, mime_type='audio/mpeg',
-            server='http://' + IP_ADDRESS + ':8000/',
+            server='http://' + IP_ADDRESS + ':%s/' % PORT,
             verbose_listener=True):
         """
         """
@@ -269,10 +277,14 @@ class CcAudioStreamer():  # {
     def toggle_pause(self):
         """ toggles between pause and resume
         """
+        prev = self.state
         if self.state == 'PLAYING':
             self.pause()
+            new = 'PAUSED'
         elif self.state == 'PAUSED':
             self.resume()
+            new = 'RESUMED'
+        return prev, new
 
     def stop(self):
         logger.info("Stop: ")
@@ -288,6 +300,7 @@ class CcAudioStreamer():  # {
         new_vol = min(cur_vol + step, 1.0)
         logger.info("VolUp: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
         self.cc.set_volume(new_vol)
+        return cur_vol, new_vol
 
     def vol_down(self, step=0.1):
         """
@@ -296,6 +309,7 @@ class CcAudioStreamer():  # {
         new_vol = max(cur_vol - step, 0)
         logger.info("VolDown: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
         self.cc.set_volume(new_vol)
+        return cur_vol, new_vol
 
     def set_vol(self, new_vol):
         """
@@ -304,7 +318,25 @@ class CcAudioStreamer():  # {
         logger.info("SetVol: Setting volume to %.2f" % (new_vol))
         self.cc.set_volume(new_vol)
 
-    def monitor_status(self):
+    def get_track_info(self):  # {
+        """
+            returns (artist, title, album, current_time, duration) if PLAYING
+            else returns None
+        """
+        self._prep_media_controller()
+        track_info = None
+        if self.state == 'PLAYING' or self.state == 'PAUSED':
+            self.mc.update_status()
+            artist = self.mc.status.artist
+            title = self.mc.status.title
+            album = self.mc.status.album_name
+            track_info = (artist, title, album,
+                to_min_sec(self.mc.status.current_time),
+                to_min_sec(self.mc.status.duration))
+        return track_info
+    # }
+
+    def monitor_status(self):  # {
         """
         """
         self._prep_media_controller()
@@ -316,8 +348,8 @@ class CcAudioStreamer():  # {
                 title = self.mc.status.title
                 album = self.mc.status.album_name
                 track_info = "%s - %s (%s)" % (artist, title, album)
-            if self.state != prev_state:
-                clear_line()
+            if self.state != prev_state:    # TODO: doesn't always catch a change...
+                _clear_line()
                 addtl_info = ": " + track_info if self.state == 'PLAYING' else ""
                 logger.info("State change -> %s%s" % (self.state, addtl_info))
                 prev_state = self.state
@@ -327,7 +359,8 @@ class CcAudioStreamer():  # {
                     to_min_sec(self.mc.status.current_time),
                     to_min_sec(self.mc.status.duration)), end='')
 
-            time.sleep(0.5)
+            time.sleep(0.25)
+    # }
 
 # }
 
@@ -374,6 +407,19 @@ class NonBlockingConsole():
         return False
 
 
+# Helpers to setup a simple http server
+# alternatively basic functionality could be accomplished via
+#    python3 -m http.server
+
+
+# figure out path from where script is run to where script is located (and where the web page is located)
+path_of_this_file = os.path.dirname(os.path.realpath(__file__))
+cwd = os.getcwd()
+assert path_of_this_file.startswith(cwd), "The '%s' script needs to be run from the same folder as/or a parent folder of the script" % os.path.basename(__file__)
+rel_path_to_web_page = os.path.relpath(path_of_this_file, cwd)
+#print(rel_path_to_web_page)
+
+
 import http.server
 import socketserver
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -382,16 +428,31 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.info(format % args)
 
-PORT = 8000
-handler = MyHTTPRequestHandler
-server = socketserver.ThreadingTCPServer(("", PORT), handler)
+    def do_GET(self):
+        # redirect landing page (IP_ADDRESS:PORT or localhost:PORT)
+        if self.path == '/':
+            self.path = os.path.join('/', rel_path_to_web_page, 'web_page.html')
 
-def simple_threaded_server():
+        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+
+    def do_POST(self):
+        print("do_POST!!")
+
+
+def simple_threaded_server(server):
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
     logger.info("Started simple server at port: %s" % PORT)
 
+def interactive_print(*args, **kwargs):
+    clear_line = kwargs.pop('clear_line', False)
+    if clear_line:
+        _clear_line()
+    else:
+        # otherwise advance to next line
+        print()
+    print(" ".join(map(str, args)), **kwargs)
 
 def interactive_mode():  # {
     """
@@ -407,7 +468,9 @@ def interactive_mode():  # {
         logger.warning("More than 10 Chromecast devices, only able to select up to 10")
 
     # startup server
-    simple_threaded_server()
+    handler = MyHTTPRequestHandler
+    my_server = socketserver.ThreadingTCPServer(("", PORT), handler)
+    simple_threaded_server(my_server)
 
     digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
     cc_selectors = digits[:len(ccs)]
@@ -438,6 +501,23 @@ def interactive_mode():  # {
     # main loop
     with NonBlockingConsole() as nbc:
         while True:  # {
+            # display a status leader
+            _clear_line()
+            if cas:
+                device_name = cas.get_name()
+                status = "%s: " % (device_name)
+                track_info = cas.get_track_info()
+                if track_info:
+                    artist, title, album, current_time, duration = track_info
+                    status += "%s - %s (%s), " % (artist, title, album)
+                    status += "%s/%s " % (current_time, duration)
+
+                status += ">"
+
+            else:
+                status = "No connected device: >"
+            print("%s \r" % status, end='')
+
             # Throttle the polling loop so python doesn't consume 100% of a core
             # - this reduces CPU to < 1% on Mac
             time.sleep(1/60)
@@ -449,28 +529,31 @@ def interactive_mode():  # {
             # quit: q   ##, <ESC>
             #if k == chr(27) or k == 'q':   ## testing for <ESC> also triggered by cursor keys
             if k == 'q':
-                server.shutdown()
-                print("Quitting")
+                my_server.shutdown()
+                interactive_print("Quitting")
                 break
 
             # select CC: 0, 1, ...
             if k in cc_selectors:
                 cc  = ccs[int(k)]
                 cas = CcAudioStreamer(cc)
-                print("selected:", cc.name, "(%s)"%cc.model_name)
+                print("Selected:", cc.name, "(%s)"%cc.model_name)
 
             # vol up & down
-            elif k == '+':
+            elif k == '+' or k == '=':
                 if cas:
-                    cas.vol_up(0.05)
-            elif k == '-':
+                    prev, new = cas.vol_up(0.05)
+                    interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
+            elif k == '-' or k == '_':
                 if cas:
-                    cas.vol_down(0.05)
+                    prev, new = cas.vol_down(0.05)
+                    interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
             # toggle pause/resume: <space>
             elif k == ' ':
                 if cas:
-                    cas.toggle_pause()
+                    prev, new = cas.toggle_pause()
+                    interactive_print(new, clear_line=True)
 
             # play folder: p
             elif k == 'p':
@@ -479,18 +562,27 @@ def interactive_mode():  # {
                     posixPath_list = list(pathlib.Path(folder).rglob("*.[mM][pP]3"))
                     filelist = [str(pp) for pp in posixPath_list]
                     random.shuffle(filelist)
-                    print("Playing playlist with %d files:" % len(filelist), filelist)
+                    print("Playing playlist with %d files: [" % len(filelist), end="")
+                    max_files_to_print = 3
+                    for i in range(min(max_files_to_print, len(filelist))):
+                        print("%s, " % os.path.basename(filelist[i]), end="")
+                    if len(filelist) > max_files_to_print:
+                        print("...]")
+
                     cas.play_list(filelist)
 
             # next & prev track
             elif k == '>' or k == '.':
                 if cas:
                     cas.next_track()
+                    interactive_print("Next track")
             elif k == '<' or k == ',':
                 if cas:
                     cas.prev_track()
+                    interactive_print("Prev track")
 
             elif k == '?':
+                print("Help")
                 show_key_mappings()
 
             # unused:
@@ -737,13 +829,4 @@ def test4():
 
 
 
-"""
-
-# file must be served...
-# see: https://rinzewind.org/blog-en/2018/how-to-send-local-files-to-chromecast-with-python.html
-# basically start simple http server from folder with the files:
-#    python3 -m http.server
-# can do this on the pi4...
-
-"""
 
