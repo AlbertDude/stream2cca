@@ -64,6 +64,9 @@ def get_ip_address():
     return ip_address
 
 IP_ADDRESS = get_ip_address()
+with open("ip_address.js", "w") as js_file:
+    js_file.write("// Dynamically generated js file for IP address\n")
+    js_file.write("const ip_address = '%s';\n" % IP_ADDRESS)
 
 def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
@@ -87,7 +90,7 @@ def to_min_sec(seconds, resolution="seconds"):
 def _clear_line():
     """ clears line and places cursor back to start of the line
     """
-    print(" " * 100 + "\r", end='')
+    print(" " * 150 + "\r", end='')
 
 
 class CcAudioStreamer():  # {
@@ -121,6 +124,7 @@ class CcAudioStreamer():  # {
         self.prev_filename = None
         self.playlist = []
         self.playlist_index = None
+        self.muted = False
 
     def get_name(self):
         return self.cc.name
@@ -257,12 +261,14 @@ class CcAudioStreamer():  # {
         self.mc.block_until_active(3) # required to "connect" the media controller to the CC session
 
     def next_track(self):
-        self.incr_playlist_index()
-        self.play(self.playlist[self.playlist_index], verbose_listener=False)
+        if self.playlist:
+            self.incr_playlist_index()
+            self.play(self.playlist[self.playlist_index], verbose_listener=False)
 
     def prev_track(self):
-        self.decr_playlist_index()
-        self.play(self.playlist[self.playlist_index], verbose_listener=False)
+        if self.playlist:
+            self.decr_playlist_index()
+            self.play(self.playlist[self.playlist_index], verbose_listener=False)
 
     def pause(self):
         logger.info("Pause: ")
@@ -293,23 +299,51 @@ class CcAudioStreamer():  # {
 
 
     # volume commands
+    def vol_toggle_mute(self):
+        """
+        """
+        if self.muted:
+            self.set_vol(self.pre_muted_vol)
+            self.muted = False
+            logger.info("Vol UNMuted")
+        else:
+            self.pre_muted_vol = self.get_vol()
+            self.set_vol(0)
+            self.muted = True
+            logger.info("Vol Muted")
+
     def vol_up(self, step=0.1):
         """
         """
-        cur_vol = self.cc.status.volume_level
-        new_vol = min(cur_vol + step, 1.0)
-        logger.info("VolUp: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
-        self.cc.set_volume(new_vol)
+        if self.muted:
+            cur_vol = self.get_vol()
+            self.vol_toggle_mute()
+            new_vol = self.get_vol()
+        else:
+            cur_vol = self.get_vol()
+            new_vol = min(cur_vol + step, 1.0)
+            logger.info("VolUp: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
+            self.cc.set_volume(new_vol)
         return cur_vol, new_vol
 
     def vol_down(self, step=0.1):
         """
         """
-        cur_vol = self.cc.status.volume_level
-        new_vol = max(cur_vol - step, 0)
-        logger.info("VolDown: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
-        self.cc.set_volume(new_vol)
+        if self.muted:
+            cur_vol = self.get_vol()
+            self.vol_toggle_mute()
+            new_vol = self.get_vol()
+        else:
+            cur_vol = self.get_vol()
+            new_vol = max(cur_vol - step, 0)
+            logger.info("VolDown: Adjusting volume from %.2f -> %.2f" % (cur_vol, new_vol))
+            self.cc.set_volume(new_vol)
         return cur_vol, new_vol
+
+    def get_vol(self):
+        """
+        """
+        return self.cc.status.volume_level
 
     def set_vol(self, new_vol):
         """
@@ -362,7 +396,7 @@ class CcAudioStreamer():  # {
             time.sleep(0.25)
     # }
 
-# }
+# } ## class CcAudioStreamer():
 
 
 def list_devices(cc_audios, cc_groups):
@@ -436,7 +470,40 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
 
     def do_POST(self):
-        print("do_POST!!")
+        content_len = self.headers['Content-Length']
+        content = self.rfile.read(int(content_len)).decode('utf-8') if content_len else ""
+
+        def get_status():
+            status = thePlayer.get_status()
+            bstatus = status.encode()
+            self.send_header("Content-Length", str(len(bstatus)))
+            self.end_headers()
+            self.wfile.write(bstatus)
+            self.wfile.flush()
+
+        # dictionary of commands and their respective handlers
+        commands = {
+                "volume_toggle_mute": thePlayer.volume_toggle_mute,
+                "volume_up": thePlayer.volume_up,
+                "volume_down": thePlayer.volume_down,
+                "prev_track": thePlayer.prev_track,
+                "next_track": thePlayer.next_track,
+                "toggle_pause": thePlayer.toggle_pause,
+                "get_status": get_status,
+                }
+        if content in commands:
+            self.send_response(200)  # 200 OK
+            self.send_header('Content-type', 'text/plain')
+            if content != "get_status":     # TODO: HACKY!
+                self.end_headers()
+            logger.info("Got POST command: %s" % content)
+            if commands[content]:
+                commands[content]()
+        else:
+            self.send_response(400)  # 400 Bad Request
+            self.end_headers()
+            logger.error("Unknown POST command: %s" % content)
+
 
 
 def simple_threaded_server(server):
@@ -447,49 +514,189 @@ def simple_threaded_server(server):
 
 class MyThreadingTCPServer(socketserver.ThreadingTCPServer):
     """
-    Attempt to address this occasional error when quit and restart server
+    This to address occasional error when quit and restart server:
         OSError: [Errno 48] Address already in use
     See: https://stackoverflow.com/questions/6380057/python-binding-socket-address-already-in-use/18858817#18858817
 
-    Seems to work on Mac
-    TODO: test on RPi4
+    Seems to work on Mac and RPi4
     """
     def server_bind(self):
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(self.server_address)
 
-def interactive_print(*args, **kwargs):
-    clear_line = kwargs.pop('clear_line', False)
-    if clear_line:
-        _clear_line()
-    else:
-        # otherwise advance to next line
-        print()
-    print(" ".join(map(str, args)), **kwargs)
 
-def interactive_mode(playlist_folder):  # {
+thePlayer = None    # global singleton
+
+class InteractivePlayer():  # {
+    """ Interactive Playlist player
+
+        Incorporates
+        - HTTP server for servicing music-file GET requests (from Chromecast) and player-command POST requests (from player-controller web page)
+        - console-based key-char-based player-controller
     """
-    """
+    def __init__(self, playlist_folder):
+        self.playlist_folder = playlist_folder
+        self.cas = None     # CC Audio Streamer
 
-    cas = None
+        self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
+        self.ccs = self.cc_audios + self.cc_groups
+        assert self.ccs, "No Chromecasts"
+        if len(self.ccs) > 10:
+            # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
+            logger.warning("More than 10 Chromecast devices, only able to select up to 10")
 
-    cc_audios, cc_groups = CcAudioStreamer.get_devices()
-    ccs = cc_audios + cc_groups
-    assert ccs, "No Chromecasts"
-    if len(ccs) > 10:
-        # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
-        logger.warning("More than 10 Chromecast devices, only able to select up to 10")
+        digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
+        self.cc_selectors = digits[:len(self.ccs)]
 
-    # startup server
-    handler = MyHTTPRequestHandler
-    my_server = MyThreadingTCPServer(("", PORT), handler)
-    simple_threaded_server(my_server)
+    def start(self):
+        self._start_server()
+        self._show_key_mappings(self.cc_selectors, self.ccs)
+        self._main_loop()
 
-    digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
-    cc_selectors = digits[:len(ccs)]
+    def _start_server(self):
+        handler = MyHTTPRequestHandler
+        self.my_server = MyThreadingTCPServer(("", PORT), handler)
+        simple_threaded_server(self.my_server)
+        logger.info("Server started")
+        print("Server started")
 
-    # show key mappings
-    def show_key_mappings():  # {
+    def _main_loop(self):  # {
+        with NonBlockingConsole() as nbc:  # {
+            while True:  # {
+                # display a status leader
+                _clear_line()
+                if self.cas:
+                    device_name = self.cas.get_name()
+                    status = "%s (%.2f): " % (device_name, self.cas.get_vol())
+                    track_info = self.cas.get_track_info()
+                    if track_info:
+                        artist, title, album, current_time, duration = track_info
+                        status += "%s - %s (%s), " % (artist, title, album)
+                        status += "%s/%s " % (current_time, duration)
+
+                    status += ">"
+
+                else:
+                    status = "No connected device: >"
+                print("%s \r" % status, end='')
+
+                # Throttle the polling loop so python doesn't consume 100% of a core
+                # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
+                # - running @ 30Hz reduces CPU to ~ 7% on RPi4
+                # - running @ 20Hz reduces CPU to ~ 5% on RPi4
+                time.sleep(1/20)
+
+                k = nbc.get_data()  # returns False if no data
+                if not k:
+                    continue
+
+                # quit: q   ##, <ESC>
+                #if k == chr(27) or k == 'q':   ## testing for <ESC> also triggered by cursor keys
+                if k == 'q':
+                    self.my_server.shutdown()
+                    interactive_print("Quitting")
+                    break
+
+                # select CC: 0, 1, ...
+                if k in self.cc_selectors:
+                    cc  = self.ccs[int(k)]
+                    self.cas = CcAudioStreamer(cc)
+                    print("Selected:", cc.name, "(%s)"%cc.model_name)
+
+                # vol up & down
+                elif k == '+' or k == '=':
+                    self.volume_up()
+                elif k == '-' or k == '_':
+                    self.volume_down()
+
+                # toggle pause/resume: <space>
+                elif k == ' ':
+                    self.toggle_pause()
+
+                # play folder: p
+                elif k == 'p':
+                    if self.cas:
+                        posixPath_list = list(pathlib.Path(self.playlist_folder).rglob("*.[mM][pP]3"))
+                        if posixPath_list:
+                            filelist = [str(pp) for pp in posixPath_list]
+                            random.shuffle(filelist)
+                            print("Playing playlist folder (%s) with %d files: [" % (self.playlist_folder, len(filelist)), end="")
+                            max_files_to_print = 3
+                            for i in range(min(max_files_to_print, len(filelist))):
+                                print("%s, " % os.path.basename(filelist[i]), end="")
+                            if len(filelist) > max_files_to_print:
+                                print("...]")
+
+                            self.cas.play_list(filelist)
+                        else:
+                            print("No files found under playlist folder: %s" % (self.playlist_folder))
+
+                # next & prev track
+                elif k == '>' or k == '.':
+                    self.next_track()
+                elif k == '<' or k == ',':
+                    self.prev_track()
+
+                elif k == '?':
+                    print("Help")
+                    self._show_key_mappings(self.cc_selectors, self.ccs)
+
+                # unused:
+                else:
+                    print('Unmapped key pressed:', k)
+            # }
+        # }
+    # }
+
+    def volume_toggle_mute(self):
+        if self.cas:
+            self.cas.vol_toggle_mute()
+
+    def volume_up(self):
+        if self.cas:
+            prev, new = self.cas.vol_up(0.05)
+            #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
+
+    def volume_down(self):
+        if self.cas:
+            prev, new = self.cas.vol_down(0.05)
+            #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
+
+    def toggle_pause(self):
+        if self.cas:
+            prev, new = self.cas.toggle_pause()
+            interactive_print(new, clear_line=True)
+
+    def next_track(self):
+        if self.cas:
+            self.cas.next_track()
+            interactive_print("Next track")
+
+    def prev_track(self):
+        if self.cas:
+            self.cas.prev_track()
+            interactive_print("Prev track")
+
+    def get_status(self):
+        if self.cas:
+            device_name = self.cas.get_name()
+            status = "%s (%.2f): " % (device_name, self.cas.get_vol())
+            track_info = self.cas.get_track_info()
+
+            if track_info:
+                artist, title, album, current_time, duration = track_info
+                status += "%s - %s (%s), " % (artist, title, album)
+                status += "%s/%s " % (current_time, duration)
+
+            status += ">"
+
+        else:
+            status = "No connected device: >"
+
+        return status
+
+    @staticmethod
+    def _show_key_mappings(cc_selectors, ccs):  # {
 
         def print_mapping(keys, descr):
             print("%s = %s" % (keys.center(7), descr))
@@ -508,105 +715,17 @@ def interactive_mode(playlist_folder):  # {
         print_mapping('?', 'show key mappings')
         print(divider)
     # }
-
-    show_key_mappings()
-
-    # main loop
-    with NonBlockingConsole() as nbc:
-        while True:  # {
-            # display a status leader
-            _clear_line()
-            if cas:
-                device_name = cas.get_name()
-                status = "%s: " % (device_name)
-                track_info = cas.get_track_info()
-                if track_info:
-                    artist, title, album, current_time, duration = track_info
-                    status += "%s - %s (%s), " % (artist, title, album)
-                    status += "%s/%s " % (current_time, duration)
-
-                status += ">"
-
-            else:
-                status = "No connected device: >"
-            print("%s \r" % status, end='')
-
-            # Throttle the polling loop so python doesn't consume 100% of a core
-            # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
-            # - running @ 30Hz reduces CPU to ~ 7% on RPi4
-            # - running @ 20Hz reduces CPU to ~ 5% on RPi4
-            time.sleep(1/20)
-
-            k = nbc.get_data()  # returns False if no data
-            if not k:
-                continue
-
-            # quit: q   ##, <ESC>
-            #if k == chr(27) or k == 'q':   ## testing for <ESC> also triggered by cursor keys
-            if k == 'q':
-                my_server.shutdown()
-                interactive_print("Quitting")
-                break
-
-            # select CC: 0, 1, ...
-            if k in cc_selectors:
-                cc  = ccs[int(k)]
-                cas = CcAudioStreamer(cc)
-                print("Selected:", cc.name, "(%s)"%cc.model_name)
-
-            # vol up & down
-            elif k == '+' or k == '=':
-                if cas:
-                    prev, new = cas.vol_up(0.05)
-                    interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
-            elif k == '-' or k == '_':
-                if cas:
-                    prev, new = cas.vol_down(0.05)
-                    interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
-
-            # toggle pause/resume: <space>
-            elif k == ' ':
-                if cas:
-                    prev, new = cas.toggle_pause()
-                    interactive_print(new, clear_line=True)
-
-            # play folder: p
-            elif k == 'p':
-                if cas:
-                    posixPath_list = list(pathlib.Path(playlist_folder).rglob("*.[mM][pP]3"))
-                    if posixPath_list:
-                        filelist = [str(pp) for pp in posixPath_list]
-                        random.shuffle(filelist)
-                        print("Playing playlist folder (%s) with %d files: [" % (playlist_folder, len(filelist)), end="")
-                        max_files_to_print = 3
-                        for i in range(min(max_files_to_print, len(filelist))):
-                            print("%s, " % os.path.basename(filelist[i]), end="")
-                        if len(filelist) > max_files_to_print:
-                            print("...]")
-
-                        cas.play_list(filelist)
-                    else:
-                        print("No files found under playlist folder: %s" % (playlist_folder))
-
-            # next & prev track
-            elif k == '>' or k == '.':
-                if cas:
-                    cas.next_track()
-                    interactive_print("Next track")
-            elif k == '<' or k == ',':
-                if cas:
-                    cas.prev_track()
-                    interactive_print("Prev track")
-
-            elif k == '?':
-                print("Help")
-                show_key_mappings()
-
-            # unused:
-            else:
-                print('Unmapped key pressed:', k)
-        # }
 # }
+
+
+def interactive_print(*args, **kwargs):
+    clear_line = kwargs.pop('clear_line', False)
+    if clear_line:
+        _clear_line()
+    else:
+        # otherwise advance to next line
+        print()
+    print(" ".join(map(str, args)), **kwargs)
 
 
 def main(args):  # {
@@ -615,7 +734,9 @@ def main(args):  # {
     playlist_folder = args.folder
 
     if len(args.command_args) == 0:
-        interactive_mode(playlist_folder)
+        global thePlayer
+        thePlayer = InteractivePlayer(playlist_folder)
+        thePlayer.start()
 
     else:  # {
         # CLI commands

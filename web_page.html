@@ -3,10 +3,28 @@
 
 <html>
   <head>
-    <link rel="stylesheet" type="text/css" href="simplehttpwebsite_style.css">
+    <!link rel="stylesheet" type="text/css" href="simplehttpwebsite_style.css">
+    
   </head>
 
+
   <body>
-    Base web page for stream2cca
+      <p id='title'> Base web page for stream2cca </p>
+
+    <!icons from: https://icons8.com/icon/set/media-player/doodle>
+
+    <button type="button" onclick=vol_toggle_mute()><img src="imgs/icons8-mute-96.png"></button>
+    <button type="button" onclick=vol_down()><img src="imgs/icons8-audio-down-96.png"></button>
+    <button type="button" onclick=vol_up()><img src="imgs/icons8-audio-96.png"></button>
+    <p> </p>
+    <button type="button" onclick=toggle_pause()><img src="imgs/icons8-pause-button-96.png"></button>
+    <button type="button" onclick=prev_track()><img src="imgs/icons8-rewind-button-round-96.png"></button>
+    <button type="button" onclick=next_track()><img src="imgs/icons8-fast-forward-round-96.png"></button>
+  
+    <p> </p>
+    <button type="button" onclick=get_status()>Get Status</button>
+    <h2 id='status'>status</h2>
   </body>
+  <script src="ip_address.js"></script>
+  <script src="web_page.js"></script>
 </html>
