@@ -468,7 +468,22 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     """ Subclass to redirect log_message to logger (rather than screen)
     """
     def log_message(self, format, *args):
-        logger.info(format % args)
+        #logger.info(format % args)
+        pass
+
+    def end_headers(self):
+        """ HACKISH override so that I can insert my own headers
+        """
+        self.send_my_headers()
+        http.server.SimpleHTTPRequestHandler.end_headers(self)
+
+    def send_my_headers(self):
+        """ my specific headers
+        """
+        # these to force image files to refresh (avoid cached versions) since we
+        # always use the same filename ('cover.jpg') for cover art
+        self.send_header("Cache-Control", "max-age=0, must-revalidate, no-store")
+
 
     def do_GET(self):
         # redirect landing page (IP_ADDRESS:PORT or localhost:PORT)

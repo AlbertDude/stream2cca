@@ -5,8 +5,6 @@ const port = "8000";
 address = ip_address + ':' + port;
 const url='http://' + address;
 
-console.log(window.location.hostname)
-
 document.getElementById('title').firstChild.textContent="stream2cca running at ".concat(url);
 
 // regularly call get_status() every 1000 ms
@@ -75,7 +73,30 @@ function get_status(){
         document.getElementById('status0').firstChild.textContent = status_array[0];
         document.getElementById('status1').firstChild.textContent = status_array[1];
         document.getElementById('status2').firstChild.textContent = status_array[2];
+
+        // Initialize a static variable for previous track
+        if ( typeof this.prev_track_status == 'undefined' ) {
+            this.prev_track_status = "";
+        }
+
+        // refresh img if track has changed
+        track_status = status_array[1];
+        if(this.prev_track_status.localeCompare(track_status) != 0) {
+            // filter out spurious assignments of 'undefined' 
+            // (not sure why we get these...)
+            if("undefined".localeCompare(track_status) != 0) {
+                console.log("Track status changed to: " + track_status)
+                refresh_img();
+                this.prev_track_status = track_status;
+            }
+        }
     }
 }
 
+function refresh_img(){
+    // append #Date.now() as technique to force reload (avoid cache)
+    // - also requires some Cache-Control headers from the server
+    // see: https://stackoverflow.com/questions/1077041/refresh-image-with-a-new-one-at-the-same-url
+    document.getElementById('cover_art').src="cover.jpg#" + Date.now();
+}
 
