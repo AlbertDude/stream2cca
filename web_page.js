@@ -9,6 +9,9 @@ console.log(window.location.hostname)
 
 document.getElementById('title').firstChild.textContent="stream2cca running at ".concat(url);
 
+// regularly call get_status() every 1000 ms
+var status_interval = setInterval(get_status, 1000);
+
 function vol_toggle_mute(){
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
@@ -18,7 +21,7 @@ function vol_toggle_mute(){
 
 function vol_down(){
     //alert("Vol - from JS");
-    document.getElementById('status').firstChild.textContent="Vol - from JS";
+    //document.getElementById('status0').firstChild.textContent="Vol - from JS";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -27,7 +30,7 @@ function vol_down(){
 
 function vol_up(){
     //alert("Vol + from JS");
-    document.getElementById('status').firstChild.textContent="Vol + from JS";
+    //document.getElementById('status0').firstChild.textContent="Vol + from JS";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -35,7 +38,7 @@ function vol_up(){
 }
 
 function prev_track(){
-    //document.getElementById('status').firstChild.textContent="Pause/Resume Toggle";
+    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -43,7 +46,7 @@ function prev_track(){
 }
 
 function next_track(){
-    //document.getElementById('status').firstChild.textContent="Pause/Resume Toggle";
+    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -51,7 +54,7 @@ function next_track(){
 }
 
 function toggle_pause(){
-    document.getElementById('status').firstChild.textContent="Pause/Resume Toggle";
+    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -65,10 +68,13 @@ function get_status(){
     Http.send("get_status");
 
     Http.onreadystatechange = (e) => {
-        //status_text = "Status: ".concat(Http.responseText)
         status_text = Http.responseText
+        status_array = status_text.split(/\r?\n/);
         //console.log(status_text)
-        document.getElementById('status').firstChild.textContent = status_text;
+        //console.log(status_array)
+        document.getElementById('status0').firstChild.textContent = status_array[0];
+        document.getElementById('status1').firstChild.textContent = status_array[1];
+        document.getElementById('status2').firstChild.textContent = status_array[2];
     }
 }
 

@@ -125,6 +125,7 @@ class CcAudioStreamer():  # {
         self.playlist = []
         self.playlist_index = None
         self.muted = False
+        self.pre_muted_vol = 0
 
     def get_name(self):
         return self.cc.name
@@ -345,6 +346,13 @@ class CcAudioStreamer():  # {
         """
         return self.cc.status.volume_level
 
+    def get_muted(self):
+        """ returns tuple with elements:
+            - boolean indicating mute status
+            - pre-mute volume (if muted)
+        """
+        return self.muted, self.pre_muted_vol
+
     def set_vol(self, new_vol):
         """
         """
@@ -474,7 +482,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         content = self.rfile.read(int(content_len)).decode('utf-8') if content_len else ""
 
         def get_status():
-            status = thePlayer.get_status()
+            device_status, track_status, playback_status = thePlayer.get_status()
+            status = "\n".join([device_status, track_status, playback_status])
             bstatus = status.encode()
             self.send_header("Content-Length", str(len(bstatus)))
             self.end_headers()
@@ -494,9 +503,11 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if content in commands:
             self.send_response(200)  # 200 OK
             self.send_header('Content-type', 'text/plain')
-            if content != "get_status":     # TODO: HACKY!
+            # TODO: HACKY! special handling for get_status()
+            # - don't log get_status() since they come in every 1000 ms
+            if content != "get_status":
                 self.end_headers()
-            logger.info("Got POST command: %s" % content)
+                logger.info("Got POST command: %s" % content)
             if commands[content]:
                 commands[content]()
         else:
@@ -565,19 +576,10 @@ class InteractivePlayer():  # {
             while True:  # {
                 # display a status leader
                 _clear_line()
-                if self.cas:
-                    device_name = self.cas.get_name()
-                    status = "%s (%.2f): " % (device_name, self.cas.get_vol())
-                    track_info = self.cas.get_track_info()
-                    if track_info:
-                        artist, title, album, current_time, duration = track_info
-                        status += "%s - %s (%s), " % (artist, title, album)
-                        status += "%s/%s " % (current_time, duration)
 
-                    status += ">"
-
-                else:
-                    status = "No connected device: >"
+                statuses = self.get_status()    # device, track, playback statuses
+                status = " ".join(statuses)
+                status += ">"
                 print("%s \r" % status, end='')
 
                 # Throttle the polling loop so python doesn't consume 100% of a core
@@ -665,35 +667,41 @@ class InteractivePlayer():  # {
     def toggle_pause(self):
         if self.cas:
             prev, new = self.cas.toggle_pause()
-            interactive_print(new, clear_line=True)
+            #interactive_print(new, clear_line=True)
 
     def next_track(self):
         if self.cas:
             self.cas.next_track()
-            interactive_print("Next track")
+            #interactive_print("Next track")
 
     def prev_track(self):
         if self.cas:
             self.cas.prev_track()
-            interactive_print("Prev track")
+            #interactive_print("Prev track")
 
     def get_status(self):
+        """ returns status as 3-element tuple
+        """
+        track_status = ""
+        playback_status = ""
         if self.cas:
             device_name = self.cas.get_name()
-            status = "%s (%.2f): " % (device_name, self.cas.get_vol())
-            track_info = self.cas.get_track_info()
+            device_status = "%s " % (device_name)
+            muted, pre_muted_vol = self.cas.get_muted()
+            if muted:
+                device_status += "(%.2fx): " % pre_muted_vol
+            else:
+                device_status += "(%.2f): " % self.cas.get_vol()
 
+            track_info = self.cas.get_track_info()
             if track_info:
                 artist, title, album, current_time, duration = track_info
-                status += "%s - %s (%s), " % (artist, title, album)
-                status += "%s/%s " % (current_time, duration)
-
-            status += ">"
-
+                track_status = "%s - %s (%s)" % (artist, title, album)
+                playback_status = "%s/%s " % (current_time, duration)
         else:
-            status = "No connected device: >"
+            device_status = "No connected device:"
 
-        return status
+        return device_status, track_status, playback_status
 
     @staticmethod
     def _show_key_mappings(cc_selectors, ccs):  # {
