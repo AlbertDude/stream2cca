@@ -267,7 +267,8 @@ class CcAudioStreamer():  # {
 
         # extract cover art to 'cover.jpg'
         assert SERVER_DIRECTORY, "SERVER_DIRECTORY not set properly"
-        pic_filename = os.path.join(SERVER_DIRECTORY, "cover.jpg")
+        assert WEB_PAGE_REL_PATH, "WEB_PAGE_REL_PATH not set properly"
+        pic_filename = os.path.join(SERVER_DIRECTORY, WEB_PAGE_REL_PATH, "cover.jpg")
         try:
             os.remove(pic_filename)  # remove old image
         except OSError:  # in case file doesn't exist
@@ -504,6 +505,7 @@ class NonBlockingConsole():
 # globals, overwrite these with proper values
 PLAYLIST_FOLDER = None
 SERVER_DIRECTORY = None
+WEB_PAGE_REL_PATH = None
 
 
 import http.server
@@ -528,8 +530,9 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
 
         # relative path from server directory to this file (and the web_page
         # resources)
-        self.web_page_rel_path = os.path.relpath(path_of_this_file, SERVER_DIRECTORY)
-#       print("web_page_rel_path:", self.web_page_rel_path)
+        global WEB_PAGE_REL_PATH
+        WEB_PAGE_REL_PATH = os.path.relpath(path_of_this_file, SERVER_DIRECTORY)
+#       print("WEB_PAGE_REL_PATH:", WEB_PAGE_REL_PATH)
 
         try:
             super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
@@ -559,11 +562,11 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
     def do_GET(self):
         # redirect landing page (IP_ADDRESS:PORT or localhost:PORT)
         if self.path == '/':
-            self.path = os.path.join('/', self.web_page_rel_path, 'web_page.html')
+            self.path = os.path.join('/', WEB_PAGE_REL_PATH, 'web_page.html')
         elif not '.mp3' in self.path:
             # since the path starts with '/', need to use raw string concat methods
             # rather than os.path.join()
-            self.path = '/' + self.web_page_rel_path + self.path
+            self.path = '/' + WEB_PAGE_REL_PATH + self.path
 
         return super().do_GET()
 
