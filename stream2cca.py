@@ -6,6 +6,7 @@ import argparse
 import datetime
 import logging
 import mutagen.easyid3  # pip3 install mutagen
+import mutagen.id3      # pip3 install mutagen
 import os
 import pathlib
 import pychromecast     # pip install PyChromecast==7.2.0  ## Other versions may work also
@@ -72,7 +73,7 @@ def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
     """
     if not isinstance(seconds, float):
-        return 'min:sec?'
+        return '--:--'
 
     if resolution == 'seconds':
         seconds += 0.5
@@ -238,12 +239,14 @@ class CcAudioStreamer():  # {
         return self.playlist[self.playlist_index]
 
     # playback controls
+
     def play(self, filename, mime_type='audio/mpeg',
             server='http://' + IP_ADDRESS + ':%s/' % PORT,
             verbose_listener=True):
         """
         """
         self.prev_filename = filename
+        assert os.path.isfile(filename), "Invalid file: %s" % (filename)
         url = server + urllib.request.pathname2url(filename)
         logger.info("Play: %s" % url)
         self._prep_media_controller(verbose_listener=verbose_listener)
@@ -261,6 +264,26 @@ class CcAudioStreamer():  # {
         except:
             album = "Unknown album"
         metadata = {'artist': artist, 'title': title, 'albumName': album}
+
+        # extract cover art to 'cover.jpg'
+        assert SERVER_DIRECTORY, "SERVER_DIRECTORY not set properly"
+        pic_filename = os.path.join(SERVER_DIRECTORY, "cover.jpg")
+        try:
+            os.remove(pic_filename)  # remove old image
+        except OSError:  # in case file doesn't exist
+            pass
+
+        tags = mutagen.id3.ID3(filename)
+        keys = ["APIC:", "APIC:Cover"]  # try these keys
+        for key in keys:
+            pic_tag = tags.get(key)
+            if pic_tag:
+                pic_data = pic_tag.data
+                if len(pic_data) > 0:
+                    with open(pic_filename, "wb") as pic_file:
+                        pic_file.write(pic_data)
+                    break
+
         self.mc.play_media(url, mime_type, metadata=metadata)
         self.mc.block_until_active(3) # required to "connect" the media controller to the CC session
 
@@ -375,8 +398,8 @@ class CcAudioStreamer():  # {
                 self.mc.update_status()
             except pychromecast.error.UnsupportedNamespace as error:
                 #logger.error(str(error))
-                logger.error(error)
-                logger.error("Exception calling self.mc.update_status()!")
+                logger.warning("Handled exception from: self.mc.update_status()!")
+                logger.warning("  %s" % error)
                 track_info = ("artist?", "title?", "album?", "cur_time?",
                         "duration?")
             else:
@@ -478,8 +501,9 @@ class NonBlockingConsole():
 #   server-root-directory to the web-page folder
 
 
-# global, overwrite with value from command-line param
+# globals, overwrite these with proper values
 PLAYLIST_FOLDER = None
+SERVER_DIRECTORY = None
 
 
 import http.server
@@ -497,20 +521,21 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         # set server directory to common folder of this file and the specified PLAYLIST_FOLDER
         cwd = os.getcwd()
         path_of_this_file = os.path.dirname(os.path.realpath(__file__))
-        server_directory = os.path.commonpath([path_of_this_file,
+        global SERVER_DIRECTORY
+        SERVER_DIRECTORY = os.path.commonpath([path_of_this_file,
             os.path.normpath(os.path.join(cwd, PLAYLIST_FOLDER))])
-#       print("server_directory:", server_directory)
+#       print("SERVER_DIRECTORY:", SERVER_DIRECTORY)
 
         # relative path from server directory to this file (and the web_page
         # resources)
-        self.web_page_rel_path = os.path.relpath(path_of_this_file, server_directory)
+        self.web_page_rel_path = os.path.relpath(path_of_this_file, SERVER_DIRECTORY)
 #       print("web_page_rel_path:", self.web_page_rel_path)
 
         try:
-            super().__init__(*args, directory=server_directory, **kwargs)
+            super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
         except BrokenPipeError as error:
-            logger.error(error)
-            logger.error("Exception calling http.server.SimpleHTTPRequestHandler.__init__()!")
+            logger.warning("Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!")
+            logger.warning("  %s" % error)
 
 
     def log_message(self, format, *args):
@@ -580,7 +605,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             self.end_headers()
             logger.error("Unknown POST command: %s" % content)
     # }
-# }
+# } ## class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def simple_threaded_server(server):
@@ -768,7 +793,7 @@ class InteractivePlayer():  # {
     def _show_key_mappings(cc_selectors, ccs):  # {
 
         def print_mapping(keys, descr):
-            print("%s = %s" % (keys.center(7), descr))
+            print("%s = %s" % (keys.center(5), descr))
 
         divider = "-"*66
         print(divider)
@@ -779,12 +804,12 @@ class InteractivePlayer():  # {
         print_mapping('- +', 'volume down/up')
         print_mapping('p', 'playfolder')
         print_mapping(',< >.', 'previous/next track')
-        print_mapping('<SPACE>', 'pause/resume')
+        print_mapping('SPACE', 'pause/resume')
         print_mapping('q', 'quit')
         print_mapping('?', 'show key mappings')
         print(divider)
     # }
-# }
+# } ## class InteractivePlayer():
 
 
 def interactive_print(*args, **kwargs):
