@@ -8,7 +8,7 @@ import logging
 import mutagen.easyid3  # pip3 install mutagen
 import os
 import pathlib
-import pychromecast as pycc     # pip install PyChromecast==7.2.0  ## Other versions may work also
+import pychromecast     # pip install PyChromecast==7.2.0  ## Other versions may work also
 import random
 import socket
 import threading
@@ -71,6 +71,9 @@ with open("ip_address.js", "w") as js_file:
 def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
     """
+    if not isinstance(seconds, float):
+        return 'min:sec?'
+
     if resolution == 'seconds':
         seconds += 0.5
 
@@ -90,7 +93,7 @@ def to_min_sec(seconds, resolution="seconds"):
 def _clear_line():
     """ clears line and places cursor back to start of the line
     """
-    print(" " * 150 + "\r", end='')
+    print(" " * 120 + "\r", end='')
 
 
 class CcAudioStreamer():  # {
@@ -102,7 +105,7 @@ class CcAudioStreamer():  # {
         """
         logger.info("Getting devices..")
         # get chromecasts
-        ccs, browser = pycc.get_chromecasts()
+        ccs, browser = pychromecast.get_chromecasts()
 
         # get audios
         cc_audios = [cc for cc in ccs if cc.cast_type=='audio']
@@ -368,13 +371,21 @@ class CcAudioStreamer():  # {
         self._prep_media_controller()
         track_info = None
         if self.state == 'PLAYING' or self.state == 'PAUSED':
-            self.mc.update_status()
-            artist = self.mc.status.artist
-            title = self.mc.status.title
-            album = self.mc.status.album_name
-            track_info = (artist, title, album,
-                to_min_sec(self.mc.status.current_time),
-                to_min_sec(self.mc.status.duration))
+            try:
+                self.mc.update_status()
+            except pychromecast.error.UnsupportedNamespace as error:
+                #logger.error(str(error))
+                logger.error(error)
+                logger.error("Exception calling self.mc.update_status()!")
+                track_info = ("artist?", "title?", "album?", "cur_time?",
+                        "duration?")
+            else:
+                artist = self.mc.status.artist
+                title = self.mc.status.title
+                album = self.mc.status.album_name
+                track_info = (artist, title, album,
+                    to_min_sec(self.mc.status.current_time),
+                    to_min_sec(self.mc.status.duration))
         return track_info
     # }
 
@@ -449,24 +460,59 @@ class NonBlockingConsole():
         return False
 
 
-# Helpers to setup a simple http server
-# alternatively basic functionality could be accomplished via
+# Helpers to setup an http server
+#
+# basic file serving functionality could be accomplished simply via
 #    python3 -m http.server
+#
+# however, our customized http server provides for additional functionality:
+# - interprets POST requests as commands to the interactive-player
+# - supports serving both the player-controller web-page content (.html, .jpgs,
+# .css, .js files) and the user-specified playlist files (.mp3)
+#   - this adds complications because want to allow user to specify
+#   arbitrary folder for the playlist
+#   - thus, we'll need to set the root directory for the http server to the
+#   commonpath of the playlist-folder and the web-page-folder
+#   - additionally, we'll need to intercept and translate the paths of the
+#   web-page file requests to incorporate the relative path from
+#   server-root-directory to the web-page folder
 
 
-# figure out path from where script is run to where script is located (and where the web page is located)
-path_of_this_file = os.path.dirname(os.path.realpath(__file__))
-cwd = os.getcwd()
-assert path_of_this_file.startswith(cwd), "The '%s' script needs to be run from the same folder as/or a parent folder of the script" % os.path.basename(__file__)
-rel_path_to_web_page = os.path.relpath(path_of_this_file, cwd)
-#print(rel_path_to_web_page)
+# global, overwrite with value from command-line param
+PLAYLIST_FOLDER = None
 
 
 import http.server
 import socketserver
-class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """ Subclass to redirect log_message to logger (rather than screen)
+class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
+    """ Subclass to:
+        - serve files from specific directory
+        - redirect log_message to logger (rather than screen)
     """
+    def __init__(self, *args, **kwargs):
+        # TODO: why does this get called every second!!!
+        assert not PLAYLIST_FOLDER is None, "Invalid PLAYLIST_FOLDER!"
+#       print("PLAYLIST_FOLDER:", PLAYLIST_FOLDER)
+
+        # set server directory to common folder of this file and the specified PLAYLIST_FOLDER
+        cwd = os.getcwd()
+        path_of_this_file = os.path.dirname(os.path.realpath(__file__))
+        server_directory = os.path.commonpath([path_of_this_file,
+            os.path.normpath(os.path.join(cwd, PLAYLIST_FOLDER))])
+#       print("server_directory:", server_directory)
+
+        # relative path from server directory to this file (and the web_page
+        # resources)
+        self.web_page_rel_path = os.path.relpath(path_of_this_file, server_directory)
+#       print("web_page_rel_path:", self.web_page_rel_path)
+
+        try:
+            super().__init__(*args, directory=server_directory, **kwargs)
+        except BrokenPipeError as error:
+            logger.error(error)
+            logger.error("Exception calling http.server.SimpleHTTPRequestHandler.__init__()!")
+
+
     def log_message(self, format, *args):
         #logger.info(format % args)
         pass
@@ -475,7 +521,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         """ HACKISH override so that I can insert my own headers
         """
         self.send_my_headers()
-        http.server.SimpleHTTPRequestHandler.end_headers(self)
+        super().end_headers()
 
     def send_my_headers(self):
         """ my specific headers
@@ -488,11 +534,15 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         # redirect landing page (IP_ADDRESS:PORT or localhost:PORT)
         if self.path == '/':
-            self.path = os.path.join('/', rel_path_to_web_page, 'web_page.html')
+            self.path = os.path.join('/', self.web_page_rel_path, 'web_page.html')
+        elif not '.mp3' in self.path:
+            # since the path starts with '/', need to use raw string concat methods
+            # rather than os.path.join()
+            self.path = '/' + self.web_page_rel_path + self.path
 
-        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+        return super().do_GET()
 
-    def do_POST(self):
+    def do_POST(self):  # {
         content_len = self.headers['Content-Length']
         content = self.rfile.read(int(content_len)).decode('utf-8') if content_len else ""
 
@@ -529,7 +579,8 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(400)  # 400 Bad Request
             self.end_headers()
             logger.error("Unknown POST command: %s" % content)
-
+    # }
+# }
 
 
 def simple_threaded_server(server):
@@ -538,7 +589,7 @@ def simple_threaded_server(server):
     server_thread.start()
     logger.info("Started simple server at port: %s" % PORT)
 
-class MyThreadingTCPServer(socketserver.ThreadingTCPServer):
+class MyThreadingTCPServer(socketserver.ThreadingTCPServer):  # {
     """
     This to address occasional error when quit and restart server:
         OSError: [Errno 48] Address already in use
@@ -549,6 +600,7 @@ class MyThreadingTCPServer(socketserver.ThreadingTCPServer):
     def server_bind(self):
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(self.server_address)
+# }
 
 
 thePlayer = None    # global singleton
@@ -580,8 +632,7 @@ class InteractivePlayer():  # {
         self._main_loop()
 
     def _start_server(self):
-        handler = MyHTTPRequestHandler
-        self.my_server = MyThreadingTCPServer(("", PORT), handler)
+        self.my_server = MyThreadingTCPServer(("", PORT), MyHTTPRequestHandler)
         simple_threaded_server(self.my_server)
         logger.info("Server started")
         print("Server started")
@@ -637,12 +688,7 @@ class InteractivePlayer():  # {
                         if posixPath_list:
                             filelist = [str(pp) for pp in posixPath_list]
                             random.shuffle(filelist)
-                            print("Playing playlist folder (%s) with %d files: [" % (self.playlist_folder, len(filelist)), end="")
-                            max_files_to_print = 3
-                            for i in range(min(max_files_to_print, len(filelist))):
-                                print("%s, " % os.path.basename(filelist[i]), end="")
-                            if len(filelist) > max_files_to_print:
-                                print("...]")
+                            print("Playing playlist folder (%s) with %d files" % (self.playlist_folder, len(filelist)))
 
                             self.cas.play_list(filelist)
                         else:
@@ -754,11 +800,12 @@ def interactive_print(*args, **kwargs):
 def main(args):  # {
     """
     """
-    playlist_folder = args.folder
+    global PLAYLIST_FOLDER
+    PLAYLIST_FOLDER = args.folder
 
     if len(args.command_args) == 0:
         global thePlayer
-        thePlayer = InteractivePlayer(playlist_folder)
+        thePlayer = InteractivePlayer(PLAYLIST_FOLDER)
         thePlayer.start()
 
     else:  # {
@@ -823,7 +870,7 @@ def main(args):  # {
 
         # play folder
         if command == 'playfolder':
-            posixPath_list = list(pathlib.Path(playlist_folder).rglob("*.[mM][pP]3"))
+            posixPath_list = list(pathlib.Path(PLAYLIST_FOLDER).rglob("*.[mM][pP]3"))
             filelist = [str(pp) for pp in posixPath_list]
             random.shuffle(filelist)
             print("Playing playlist with %d files:" % len(filelist), filelist)
