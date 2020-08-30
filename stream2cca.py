@@ -130,6 +130,7 @@ class CcAudioStreamer():  # {
         self.playlist_index = None
         self.muted = False
         self.pre_muted_vol = 0
+        self.consecutive_update_status_exceptions = 0
 
     def get_name(self):
         return self.cc.name
@@ -389,20 +390,22 @@ class CcAudioStreamer():  # {
 
     def get_track_info(self):  # {
         """
-            returns (artist, title, album, current_time, duration) if PLAYING
-            else returns None
+            returns tuple of strings for (artist, title, album, current_time, duration)
+            returns None if loses connection with device
         """
         self._prep_media_controller()
-        track_info = None
+        track_info = ""
         if self.state == 'PLAYING' or self.state == 'PAUSED':
             try:
                 self.mc.update_status()
-            except pychromecast.error.UnsupportedNamespace as error:
-                #logger.error(str(error))
+            except (pychromecast.error.UnsupportedNamespace, pychromecast.error.NotConnected) as error:
                 logger.warning("Handled exception from: self.mc.update_status()!")
                 logger.warning("  %s" % error)
-                track_info = ("artist?", "title?", "album?", "cur_time?",
-                        "duration?")
+                track_info = ("artist?", "title?", "album?", "cur_time?", "duration?")
+                MAX_CONSECUTIVE_EXCEPTIONS = 10
+                self.consecutive_update_status_exceptions += 1
+                if self.consecutive_update_status_exceptions >= MAX_CONSECUTIVE_EXCEPTIONS:
+                    return None
             else:
                 artist = self.mc.status.artist
                 title = self.mc.status.title
@@ -410,6 +413,7 @@ class CcAudioStreamer():  # {
                 track_info = (artist, title, album,
                     to_min_sec(self.mc.status.current_time),
                     to_min_sec(self.mc.status.duration))
+                self.consecutive_update_status_exceptions = 0
         return track_info
     # }
 
@@ -517,22 +521,6 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
     """
     def __init__(self, *args, **kwargs):
         # TODO: why does this get called every second!!!
-        assert not PLAYLIST_FOLDER is None, "Invalid PLAYLIST_FOLDER!"
-#       print("PLAYLIST_FOLDER:", PLAYLIST_FOLDER)
-
-        # set server directory to common folder of this file and the specified PLAYLIST_FOLDER
-        cwd = os.getcwd()
-        path_of_this_file = os.path.dirname(os.path.realpath(__file__))
-        global SERVER_DIRECTORY
-        SERVER_DIRECTORY = os.path.commonpath([path_of_this_file,
-            os.path.normpath(os.path.join(cwd, PLAYLIST_FOLDER))])
-#       print("SERVER_DIRECTORY:", SERVER_DIRECTORY)
-
-        # relative path from server directory to this file (and the web_page
-        # resources)
-        global WEB_PAGE_REL_PATH
-        WEB_PAGE_REL_PATH = os.path.relpath(path_of_this_file, SERVER_DIRECTORY)
-#       print("WEB_PAGE_REL_PATH:", WEB_PAGE_REL_PATH)
 
         try:
             super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
@@ -568,7 +556,27 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             # rather than os.path.join()
             self.path = '/' + WEB_PAGE_REL_PATH + self.path
 
+        # Occasionally get this exception
+        """
+        File "./stream2cca.py", line 571, in do_GET
         return super().do_GET()
+        File "/usr/lib/python3.7/http/server.py", line 653, in do_GET
+        self.copyfile(f, self.wfile)
+        File "/usr/lib/python3.7/http/server.py", line 844, in copyfile
+        shutil.copyfileobj(source, outputfile)
+        File "/usr/lib/python3.7/shutil.py", line 82, in copyfileobj
+        fdst.write(buf)
+        File "/usr/lib/python3.7/socketserver.py", line 799, in write
+        self._sock.sendall(b)
+        ConnectionResetError: [Errno 104] Connection reset by peer
+        ----------------------------------------
+        """
+
+        try:
+            super().do_GET()
+        except ConnectionResetError as error:
+            logger.warning("Handled exception from: super().do_GET()!")
+            logger.warning("  %s" % error)
 
     def do_POST(self):  # {
         content_len = self.headers['Content-Length']
@@ -644,6 +652,9 @@ class InteractivePlayer():  # {
         self.playlist_folder = playlist_folder
         self.cas = None     # CC Audio Streamer
 
+        self._get_devices()
+
+    def _get_devices(self):
         self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
         self.ccs = self.cc_audios + self.cc_groups
         assert self.ccs, "No Chromecasts"
@@ -730,6 +741,7 @@ class InteractivePlayer():  # {
 
                 elif k == '?':
                     print("Help")
+                    self._get_devices()
                     self._show_key_mappings(self.cc_selectors, self.ccs)
 
                 # unused:
@@ -783,10 +795,15 @@ class InteractivePlayer():  # {
                 device_status += "(%.2f): " % self.cas.get_vol()
 
             track_info = self.cas.get_track_info()
-            if track_info:
-                artist, title, album, current_time, duration = track_info
-                track_status = "%s - %s (%s)" % (artist, title, album)
-                playback_status = "%s/%s " % (current_time, duration)
+            if not track_info is None:
+                if track_info != "":
+                    artist, title, album, current_time, duration = track_info
+                    track_status = "%s - %s (%s)" % (artist, title, album)
+                    playback_status = "%s/%s " % (current_time, duration)
+            else:
+                device_status = "Disconnected from device:"
+                print("Disconnected from device:")
+                self.cas = None
         else:
             device_status = "No connected device:"
 
@@ -830,6 +847,20 @@ def main(args):  # {
     """
     global PLAYLIST_FOLDER
     PLAYLIST_FOLDER = args.folder
+
+    # set server directory to common folder of this file and the specified PLAYLIST_FOLDER
+    cwd = os.getcwd()
+    path_of_this_file = os.path.dirname(os.path.realpath(__file__))
+    global SERVER_DIRECTORY
+    SERVER_DIRECTORY = os.path.commonpath([path_of_this_file,
+        os.path.normpath(os.path.join(cwd, PLAYLIST_FOLDER))])
+#   print("SERVER_DIRECTORY:", SERVER_DIRECTORY)
+
+    # relative path from server directory to this file (and the web_page
+    # resources)
+    global WEB_PAGE_REL_PATH
+    WEB_PAGE_REL_PATH = os.path.relpath(path_of_this_file, SERVER_DIRECTORY)
+#   print("WEB_PAGE_REL_PATH:", WEB_PAGE_REL_PATH)
 
     if len(args.command_args) == 0:
         global thePlayer

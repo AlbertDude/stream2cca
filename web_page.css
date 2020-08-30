@@ -1,6 +1,15 @@
 html *
 {
-   font-size: 1em !important;
-   color: #000 !important;
-   font-family: Arial !important;
+    font-size: 15px !important;
+    line-height: 30%;
+    color: #000 !important;
+    /*
+    Only able to find a few monspaced-sans fonts that just worked on mobile & desktop 
+    (w/o going to trouble of installing additional fonts)
+    - and weirdly, "Monaco" looks quite different on mobile vs. desktop (looks nicer on mobile)
+    font-family: "Courier";
+    font-family: "Monaco";
+    */
+    font-family: "Monaco";
 }
+
