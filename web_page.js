@@ -1,7 +1,6 @@
 
-// references ip_address from dynamically generated ip_address.js
+// references ip_address and port from dynamically generated ip_address.js
 
-const port = "8000";
 address = ip_address + ':' + port;
 const url='http://' + address;
 
@@ -58,49 +57,89 @@ function toggle_pause(){
 }
 
 function get_status(){
+    // This gets called at regular intervals (currently every 1000 ms)
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("get_status");
 
     Http.onreadystatechange = (e) => {
-        status_text = Http.responseText
-        status_array = status_text.split(/\r?\n/);
-        //console.log(status_text)
-        //console.log(status_array)
-//      document.getElementById('status0').firstChild.textContent = status_array[0];
-//      document.getElementById('status1').firstChild.textContent = status_array[1];
-//      document.getElementById('status2').firstChild.textContent = status_array[2];
-
-        len0 = status_array[0].length;
-        if(len0 > 0) { 
+        if (Http.readyState === XMLHttpRequest.DONE) {
             MAX_LEN = 40;
-            len2 = status_array[2].length;
-//          console.log("len2: " + len2 + ":: '" + status_array[2] + "'")
-            //spacer_len = MAX_LEN - (status_array[0].length + status_array[2].length);
-            spacer_len = MAX_LEN - (len0 + len2);
-            //console.log("SpacerLen: " + spacer_len + ":: '" + status_array[0] + "'")
-            spacer = ""
-            for (i = 0; i < spacer_len; i++) {
-                spacer += "\xa0";   // non-breaking space
+            NBSP = "\xa0";  // Non-breaking space
+            status_text = Http.responseText;
+            status_array = status_text.split(/\r?\n/);
+
+            device = status_array[0];
+            volume = status_array[1];
+            track = status_array[2];
+            playback = status_array[3];
+
+            //console.log(status_array)
+
+            len0 = status_array[0].length;
+
+            // status line 0:
+            // 0123456789012345678901234567890123456789
+            // device_name        vol       ee:ee/dd:dd
+            line0_len = device.length + volume.length + playback.length;
+            device = "<b>" + device + "</b>";
+            if (line0_len >= MAX_LEN - 2) {
+                line0 = device + NBSP + volume + NBSP + playback;
             }
-            str0 = status_array[0] + spacer + status_array[2];
-    //      console.log(str0.length)
-            document.getElementById('status0').firstChild.textContent = str0;
-        }
+            else {
+                spacer0_len = Math.floor((MAX_LEN - line0_len) / 2);
+                console.log(spacer0_len);
+                spacer1_len = MAX_LEN - line0_len - spacer0_len;
+                spacer0 = NBSP.repeat(spacer0_len);
+                spacer1 = NBSP.repeat(spacer1_len);
+                line0 = device + spacer0 + volume + spacer1 + playback;
+            }
+            //document.getElementById('status0').firstChild.textContent = line0;
+            document.getElementById('status0').innerHTML = line0;
 
-        if (status_array.length > 1) {
+            // status line 1:
+            // artist - title (album)
 
-            len1 = status_array[1].length;
-            if (len1 > 0) {
-                if (len1 <= MAX_LEN) {
-                    track_status = status_array[1];
+            // Initialize a static variable for scroll index
+            if (typeof this.scroll_index == 'undefined') {
+                this.scroll_index = 0;
+            }
+
+            track_status = "";
+            full_track_status = "";
+            track_len = track.length;
+            if (track_len > 0) {
+                full_track_status = track.split(' ').join(NBSP);
+                if (track_len <= MAX_LEN) {
+                    track_status = full_track_status;
                 }
                 else {
-                    track_status = status_array[1].substring(0, MAX_LEN - 3) + "..";
+                    extended_track_status = full_track_status + "\xa0\xa0\xa0\xa0";
+                    len_extended = extended_track_status.length;
+                    // first part
+                    end_index = Math.min(...[len_extended, this.scroll_index + MAX_LEN - 1]);
+                    first_part = extended_track_status.substring(this.scroll_index, end_index);
+                    // second part
+                    second_part = "";
+                    len_second = MAX_LEN - 1 - first_part.length;
+                    if (len_second > 0) {
+                        second_part += extended_track_status.substring(0, len_second);
+                    }
+                    track_status = first_part + second_part;
+                    this.scroll_index += 1;
+                    if (this.scroll_index > len_extended) {
+                        this.scroll_index = 0;
+                    }
+
+                    // Initialize a static variable for initial timestamp
+                    if (typeof this.init_time == 'undefined') {
+                        this.init_time = Date.now();
+                    }
+                    //console.log(Math.round((Date.now() - self.init_time)/1000), this.scroll_index);
                 }
-                document.getElementById('status1').firstChild.textContent = track_status;
             }
+            document.getElementById('status1').firstChild.textContent = track_status;
 
             // Initialize a static variable for previous track
             if (typeof this.prev_track_status == 'undefined') {
@@ -108,13 +147,13 @@ function get_status(){
             }
 
             // refresh img if track has changed
-            if (this.prev_track_status.localeCompare(track_status) != 0) {
+            if (this.prev_track_status.localeCompare(full_track_status) != 0) {
                 // filter out spurious assignments of 'undefined' 
                 // (not sure why we get these...)
-                if ("undefined".localeCompare(track_status) != 0) {
-                    console.log("Track status changed to: " + track_status)
+                if ("undefined".localeCompare(full_track_status) != 0) {
+                    console.log("Track status changed to: " + full_track_status)
                     refresh_img();
-                    this.prev_track_status = track_status;
+                    this.prev_track_status = full_track_status;
                 }
             }
         }

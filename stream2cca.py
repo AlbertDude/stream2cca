@@ -46,13 +46,16 @@ logging_ch.setLevel(logging.WARN)
 logger.addHandler(logging_ch)
 
 
-# Network port to use
-PORT = 8000
-
 
 # helpers
 #
 
+# Network port to use
+# - Chromecast Audio uses an AKM AK4430 DAC...
+# Note: this port is assigned for use by REAL SQL Serer (so beware of the
+# potential conflict):
+# https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?&page=83
+PORT = 4430
 
 def get_ip_address():
     """ returns the machines local ip address
@@ -68,6 +71,7 @@ IP_ADDRESS = get_ip_address()
 with open("ip_address.js", "w") as js_file:
     js_file.write("// Dynamically generated js file for IP address\n")
     js_file.write("const ip_address = '%s';\n" % IP_ADDRESS)
+    js_file.write("const port = '%d';\n" % PORT)
 
 def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
@@ -242,7 +246,7 @@ class CcAudioStreamer():  # {
     # playback controls
 
     def play(self, filename, mime_type='audio/mpeg',
-            server='http://' + IP_ADDRESS + ':%s/' % PORT,
+            server='http://' + IP_ADDRESS + ':%d/' % PORT,
             verbose_listener=True):
         """
         """
@@ -402,7 +406,7 @@ class CcAudioStreamer():  # {
                 logger.warning("Handled exception from: self.mc.update_status()!")
                 logger.warning("  %s" % error)
                 track_info = ("artist?", "title?", "album?", "cur_time?", "duration?")
-                MAX_CONSECUTIVE_EXCEPTIONS = 10
+                MAX_CONSECUTIVE_EXCEPTIONS = 20
                 self.consecutive_update_status_exceptions += 1
                 if self.consecutive_update_status_exceptions >= MAX_CONSECUTIVE_EXCEPTIONS:
                     return None
@@ -583,8 +587,16 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         content = self.rfile.read(int(content_len)).decode('utf-8') if content_len else ""
 
         def get_status():
-            device_status, track_status, playback_status = thePlayer.get_status()
-            status = "\n".join([device_status, track_status, playback_status])
+            """
+                sends response with status information composed of four elements (device,
+                volume, track, playback), separated by "\n"
+                - device ("device name")
+                - volume (000-100)
+                - track ("artist - title (album):)
+                - playback ("elapsed/duration")
+            """
+            device_status, volume_status, track_status, playback_status = thePlayer.get_status()
+            status = "\n".join([device_status, volume_status, track_status, playback_status])
             bstatus = status.encode()
             self.send_header("Content-Length", str(len(bstatus)))
             self.end_headers()
@@ -623,7 +635,7 @@ def simple_threaded_server(server):
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
-    logger.info("Started simple server at port: %s" % PORT)
+    logger.info("Started simple server at port: %d" % PORT)
 
 class MyThreadingTCPServer(socketserver.ThreadingTCPServer):  # {
     """
@@ -781,18 +793,20 @@ class InteractivePlayer():  # {
             #interactive_print("Prev track")
 
     def get_status(self):
-        """ returns status as 3-element tuple
+        """ returns status as 4-element tuple
         """
+        volume_status = ""
         track_status = ""
         playback_status = ""
         if self.cas:
             device_name = self.cas.get_name()
             device_status = "%s " % (device_name)
+
             muted, pre_muted_vol = self.cas.get_muted()
             if muted:
-                device_status += "(%.2fx): " % pre_muted_vol
+                volume_status = "x%03d" % int(100 * pre_muted_vol + 0.5)
             else:
-                device_status += "(%.2f): " % self.cas.get_vol()
+                volume_status = " %03d" % int(100 * self.cas.get_vol() + 0.5)
 
             track_info = self.cas.get_track_info()
             if not track_info is None:
@@ -807,7 +821,7 @@ class InteractivePlayer():  # {
         else:
             device_status = "No connected device:"
 
-        return device_status, track_status, playback_status
+        return device_status, volume_status, track_status, playback_status
 
     @staticmethod
     def _show_key_mappings(cc_selectors, ccs):  # {
