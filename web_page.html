@@ -9,21 +9,21 @@
 
     <body style="background-color:grey;">
         <!icons from: https://icons8.com/icon/set/media-player/doodle>
-        <button type="button" onclick=vol_toggle_mute()><img src="imgs/icons8-mute-96.png"></button>
-        <button type="button" onclick=vol_down()><img src="imgs/icons8-audio-down-96.png"></button>
-        <button type="button" onclick=vol_up()><img src="imgs/icons8-audio-96.png"></button>
+        <button class="buttons" type="button" onclick=vol_toggle_mute()><img src="imgs/icons8-mute-96.png"></button>
+        <button class="buttons" type="button" onclick=vol_down()><img src="imgs/icons8-audio-down-96.png"></button>
+        <button class="buttons" type="button" onclick=vol_up()><img src="imgs/icons8-audio-96.png"></button>
 
         <p> </p>
-        <button type="button" onclick=toggle_pause()><img id='toggle_pause_img' src="imgs/icons8-pause-button-96.png"></button>
-        <button type="button" onclick=prev_track()><img src="imgs/icons8-rewind-button-round-96.png"></button>
-        <button type="button" onclick=next_track()><img src="imgs/icons8-fast-forward-round-96.png"></button>
+        <button class="buttons" type="button" onclick=toggle_pause()><img id='toggle_pause_img' src="imgs/icons8-pause-button-96.png"></button>
+        <button class="buttons" type="button" onclick=prev_track()><img src="imgs/icons8-rewind-button-round-96.png"></button>
+        <button class="buttons" type="button" onclick=next_track()><img src="imgs/icons8-fast-forward-round-96.png"></button>
 
         <p> </p>
         <p id='status0'> </p>
         <p id='status1'> </p>
         <p id='status2'> </p>
 
-        <img id='cover_art' src="cover.jpg" alt="Cover Art" style="width:350px;height:350px;">
+        <img id='cover_art' src="cover.jpg" alt="Cover Art" style="width:630px;height:630px;">
     </body>
 
     <script src="ip_address.js"></script>
