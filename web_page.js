@@ -2,16 +2,33 @@
 // references ip_address and port from dynamically generated ip_address.js
 
 address = ip_address + ':' + port;
-const url='http://' + address;
+
+// if web page is viewing "localhost", then the server requests need to be from
+// "localhost" as well rather than the numeric ip address
+if (location.hostname == "localhost") {
+    url='http://localhost' + ':' + port;
+}
+else {
+    url='http://' + address;
+}
+
 
 // regularly call get_status() every 1000 ms
 var status_interval = setInterval(get_status, 1000);
+
 
 function vol_toggle_mute(){
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("volume_toggle_mute");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function vol_down(){
@@ -21,6 +38,13 @@ function vol_down(){
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("volume_down");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function vol_up(){
@@ -30,6 +54,13 @@ function vol_up(){
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("volume_up");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function prev_track(){
@@ -38,6 +69,13 @@ function prev_track(){
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("prev_track");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function next_track(){
@@ -46,6 +84,13 @@ function next_track(){
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("next_track");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function toggle_pause(){
@@ -54,6 +99,13 @@ function toggle_pause(){
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     Http.send("toggle_pause");
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
 }
 
 function get_status(){
@@ -65,35 +117,64 @@ function get_status(){
 
     Http.onreadystatechange = (e) => {
         if (Http.readyState === XMLHttpRequest.DONE) {
-            MAX_LEN = 40;
+            MAX_LEN = 39;
             NBSP = "\xa0";  // Non-breaking space
+            BOLD = "<b>";
+            BOLD_END = "</b>";
+            ITALIC = "<i>";
+            ITALIC_END = "</i>";
             status_text = Http.responseText;
             status_array = status_text.split(/\r?\n/);
+//          console.log(status_array);
 
-            device = status_array[0];
-            volume = status_array[1];
-            track = status_array[2];
-            playback = status_array[3];
+            function scroll_text(full_track_status) {
+                extended_track_status = full_track_status + NBSP.repeat(4);
+                len_extended = extended_track_status.length;
+                // first part
+                end_index = Math.min(...[len_extended, this.scroll_index + MAX_LEN]);
+                first_part = extended_track_status.substring(this.scroll_index, end_index);
+                // second part
+                second_part = "";
+                len_second = MAX_LEN - first_part.length;
+                if (len_second > 0) {
+                    second_part += extended_track_status.substring(0, len_second);
+                }
+                track_status = first_part + second_part;
+                this.scroll_index += 1;
+                if (this.scroll_index > len_extended) {
+                    this.scroll_index = 0;
+                }
 
-            //console.log(status_array)
+                return track_status;
+            }
 
-            len0 = status_array[0].length;
+            [device, volume, artist, title, album, current_time, duration, paused] = status_array;
+
+            if (current_time.length > 0 && duration.length > 0) {
+                playback_len = current_time.length + duration.length + 1;
+                playback = current_time + BOLD + "/" + BOLD_END + duration;
+            }
+            else {
+                playback = "";
+                playback_len = playback.length;
+            }
 
             // status line 0:
             // 0123456789012345678901234567890123456789
             // device_name        vol       ee:ee/dd:dd
-            line0_len = device.length + volume.length + playback.length;
-            device = "<b>" + device + "</b>";
+            line0_len = device.length + volume.length + playback_len;
+//          console.log("line0:" + device.length + volume.length + playback_len);
+            device = BOLD + device + BOLD_END;
             if (line0_len >= MAX_LEN - 2) {
                 line0 = device + NBSP + volume + NBSP + playback;
             }
             else {
                 spacer0_len = Math.floor((MAX_LEN - line0_len) / 2);
-                console.log(spacer0_len);
                 spacer1_len = MAX_LEN - line0_len - spacer0_len;
                 spacer0 = NBSP.repeat(spacer0_len);
                 spacer1 = NBSP.repeat(spacer1_len);
                 line0 = device + spacer0 + volume + spacer1 + playback;
+//              console.log("Spacers:" + spacer0_len + spacer1_len)
             }
             //document.getElementById('status0').firstChild.textContent = line0;
             document.getElementById('status0').innerHTML = line0;
@@ -106,40 +187,39 @@ function get_status(){
                 this.scroll_index = 0;
             }
 
+            //track_status = "%s - %s (%s)" % (artist, title, album)
+            track = artist + " - " + title + " (" + album + ")";
+// Problem with formatted track status is the scroller implmentations ...
+//          track = BOLD + artist + BOLD_END + " - " + title + ITALIC + " (" + album + ")" + ITALIC_END;
+            track_len = artist.length + title.length + album.length + 6;
+
             track_status = "";
             full_track_status = "";
-            track_len = track.length;
             if (track_len > 0) {
                 full_track_status = track.split(' ').join(NBSP);
                 if (track_len <= MAX_LEN) {
                     track_status = full_track_status;
                 }
                 else {
-                    extended_track_status = full_track_status + "\xa0\xa0\xa0\xa0";
-                    len_extended = extended_track_status.length;
-                    // first part
-                    end_index = Math.min(...[len_extended, this.scroll_index + MAX_LEN - 1]);
-                    first_part = extended_track_status.substring(this.scroll_index, end_index);
-                    // second part
-                    second_part = "";
-                    len_second = MAX_LEN - 1 - first_part.length;
-                    if (len_second > 0) {
-                        second_part += extended_track_status.substring(0, len_second);
-                    }
-                    track_status = first_part + second_part;
-                    this.scroll_index += 1;
-                    if (this.scroll_index > len_extended) {
-                        this.scroll_index = 0;
-                    }
+                    track_status = scroll_text(full_track_status);
 
-                    // Initialize a static variable for initial timestamp
-                    if (typeof this.init_time == 'undefined') {
-                        this.init_time = Date.now();
-                    }
-                    //console.log(Math.round((Date.now() - self.init_time)/1000), this.scroll_index);
+//                  // Initialize a static variable for initial timestamp
+//                  if (typeof this.init_time == 'undefined') {
+//                      this.init_time = Date.now();
+//                  }
+//                  console.log(Math.round((Date.now() - self.init_time)/1000), this.scroll_index);
                 }
             }
-            document.getElementById('status1').firstChild.textContent = track_status;
+            //document.getElementById('status1').firstChild.textContent = track_status;
+            document.getElementById('status1').innerHTML = track_status;
+
+            // set play/pause button image appropriately
+            if (paused == "0") {
+                document.getElementById('toggle_pause_img').src = "imgs/icons8-pause-button-96.png";
+            }
+            else {
+                document.getElementById('toggle_pause_img').src = "imgs/icons8-circled-play-96.png";
+            }
 
             // Initialize a static variable for previous track
             if (typeof this.prev_track_status == 'undefined') {

@@ -51,11 +51,9 @@ logger.addHandler(logging_ch)
 #
 
 # Network port to use
-# - Chromecast Audio uses an AKM AK4430 DAC...
-# Note: this port is assigned for use by REAL SQL Serer (so beware of the
-# potential conflict):
-# https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?&page=83
-PORT = 4430
+# 9812 - Unassigned
+#      - https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?&page=117
+PORT = 9812
 
 def get_ip_address():
     """ returns the machines local ip address
@@ -99,6 +97,11 @@ def _clear_line():
     """ clears line and places cursor back to start of the line
     """
     print(" " * 120 + "\r", end='')
+
+def _clear_line2():
+    """ clears line and places cursor back to start of the line
+    """
+    print("\r" + " " * 120 + "\r", end='')
 
 
 class CcAudioStreamer():  # {
@@ -325,6 +328,9 @@ class CcAudioStreamer():  # {
             new = 'RESUMED'
         return prev, new
 
+    def get_paused(self):
+        return self.state == 'PAUSED'
+
     def stop(self):
         logger.info("Stop: ")
         self._prep_media_controller()
@@ -403,17 +409,26 @@ class CcAudioStreamer():  # {
             try:
                 self.mc.update_status()
             except (pychromecast.error.UnsupportedNamespace, pychromecast.error.NotConnected) as error:
-                logger.warning("Handled exception from: self.mc.update_status()!")
+                logger.warning("Handled exception from: self.mc.update_status()!: %d" % self.consecutive_update_status_exceptions)
                 logger.warning("  %s" % error)
                 track_info = ("artist?", "title?", "album?", "cur_time?", "duration?")
-                MAX_CONSECUTIVE_EXCEPTIONS = 20
+                if self.consecutive_update_status_exceptions == 0:
+                    self.update_status_exceptions_start_time = datetime.datetime.now()
+                else:
+                    elapsed = datetime.datetime.now() - self.update_status_exceptions_start_time
+                    MAX_DURATION_EXCEPTIONS = 4
+                    if elapsed.seconds >= MAX_DURATION_EXCEPTIONS:
+                        logger.error("Got %d consecutive update status exceptions over %d seconds, disconnecting.."
+                                % (self.consecutive_update_status_exceptions, elapsed.seconds))
+                        return None
                 self.consecutive_update_status_exceptions += 1
-                if self.consecutive_update_status_exceptions >= MAX_CONSECUTIVE_EXCEPTIONS:
-                    return None
             else:
                 artist = self.mc.status.artist
+                artist = "??" if artist is None else artist
                 title = self.mc.status.title
+                title = "??" if title is None else title
                 album = self.mc.status.album_name
+                album = "??" if album is None else album
                 track_info = (artist, title, album,
                     to_min_sec(self.mc.status.current_time),
                     to_min_sec(self.mc.status.duration))
@@ -588,15 +603,21 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
 
         def get_status():
             """
-                sends response with status information composed of four elements (device,
-                volume, track, playback), separated by "\n"
+                sends response with status information composed of 8 elements, separated by "\n"
                 - device ("device name")
                 - volume (000-100)
-                - track ("artist - title (album):)
-                - playback ("elapsed/duration")
+                - artist
+                - title
+                - album
+                - current_time ("--:--")
+                - duration ("--:--")
+                - paused ("1")
             """
-            device_status, volume_status, track_status, playback_status = thePlayer.get_status()
-            status = "\n".join([device_status, volume_status, track_status, playback_status])
+            statuses = thePlayer.get_status()
+            try:
+                status = "\n".join(statuses)
+            except TypeError:
+                statuts = "\n".join(["??"]*7)
             bstatus = status.encode()
             self.send_header("Content-Length", str(len(bstatus)))
             self.end_headers()
@@ -692,12 +713,39 @@ class InteractivePlayer():  # {
         with NonBlockingConsole() as nbc:  # {
             while True:  # {
                 # display a status leader
-                _clear_line()
+                _clear_line2()
 
-                statuses = self.get_status()    # device, track, playback statuses
-                status = " ".join(statuses)
+                statuses = self.get_status()
+                device, volume, artist, title, album, current_time, duration, paused = statuses
+                if device == "":
+                    status = "Not connected to a device:"
+                else:
+                    # Ideally would use these from "Misc Technical" but the PLAY doesn't display properly with my default mac font
+                    # http://unicode.org/charts/PDF/U2300.pdf
+#                   PLAY_CH = "\u23f5"
+#                   PAUSE_CH = "\u23f8"
+#                   STOP_CH = "\u23f9"
+
+                    # Instead, use "Block Elements":
+                    # http://unicode.org/charts/PDF/U2580.pdf
+                    PLAY_CH  = " \u25b6"
+                    PAUSE_CH = "\u258c\u258c"
+                    STOP_CH  = " \u2587"
+
+                    status = "%s: %s: " % (device, volume)
+                    if artist == "" and title == "" and album == "" and current_time == "" and duration == "":
+                        status += "%s " % STOP_CH
+                    else:
+                        if paused == "1":
+                            play_pause_ch = PAUSE_CH
+                        else:
+                            play_pause_ch = PLAY_CH
+                        status += "%s " % play_pause_ch
+
+                        status += "%s - %s (%s): " % (artist, title, album)
+                        status += "%s/%s " % (current_time, duration)
                 status += ">"
-                print("%s \r" % status, end='')
+                print("\r%s " % status, end='')
 
                 # Throttle the polling loop so python doesn't consume 100% of a core
                 # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
@@ -792,36 +840,54 @@ class InteractivePlayer():  # {
             self.cas.prev_track()
             #interactive_print("Prev track")
 
-    def get_status(self):
-        """ returns status as 4-element tuple
+    def get_status(self):  # {
+        """ returns status as 7-element tuple
+            - device, volume, artist, title, album, current_time, duration
         """
-        volume_status = ""
-        track_status = ""
-        playback_status = ""
+        device = ""
+        volume = ""
+        artist = ""
+        title = ""
+        album = ""
+        current_time = ""
+        duration = ""
+        paused = ""
         if self.cas:
-            device_name = self.cas.get_name()
-            device_status = "%s " % (device_name)
+            device = self.cas.get_name()
 
             muted, pre_muted_vol = self.cas.get_muted()
+            # unicode speaker characters
+            SPEAKER = "\U0001F508"
+            SPEAKER_1 = "\U0001F509"
+            SPEAKER_3 = "\U0001F50A"
+            SPEAKER_MUTE = "\U0001F507"
             if muted:
-                volume_status = "x%03d" % int(100 * pre_muted_vol + 0.5)
+                volume = SPEAKER_MUTE + "%03d" % int(100 * pre_muted_vol + 0.5)
             else:
-                volume_status = " %03d" % int(100 * self.cas.get_vol() + 0.5)
+                volume = SPEAKER_3 + "%03d" % int(100 * self.cas.get_vol() + 0.5)
 
             track_info = self.cas.get_track_info()
             if not track_info is None:
                 if track_info != "":
                     artist, title, album, current_time, duration = track_info
-                    track_status = "%s - %s (%s)" % (artist, title, album)
-                    playback_status = "%s/%s " % (current_time, duration)
+#                   track_status = "%s - %s (%s)" % (artist, title, album)
+#                   playback_status = "%s/%s " % (current_time, duration)
             else:
-                device_status = "Disconnected from device:"
+                device = "Disconnected from device:"
                 print("Disconnected from device:")
                 self.cas = None
-        else:
-            device_status = "No connected device:"
 
-        return device_status, volume_status, track_status, playback_status
+            try:
+                if self.cas.get_paused():
+                    paused = "1"
+                else:
+                    paused = "0"
+            except AttributeError:
+                # think this can occur if self.cas happens to die in the midst
+                pass
+
+        return device, volume, artist, title, album, current_time, duration, paused
+    # }
 
     @staticmethod
     def _show_key_mappings(cc_selectors, ccs):  # {

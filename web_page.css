@@ -9,6 +9,7 @@ html *
     - and weirdly, "Monaco" looks quite different on mobile vs. desktop (looks nicer on mobile)
     font-family: "Courier";
     font-family: "Monaco";
+    - NOTE: bold not really noticeable with Monaco, but is with Courier
     */
     font-family: "Monaco";
 }
