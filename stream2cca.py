@@ -690,7 +690,6 @@ class InteractivePlayer():  # {
     def _get_devices(self):
         self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
         self.ccs = self.cc_audios + self.cc_groups
-        assert self.ccs, "No Chromecasts"
         if len(self.ccs) > 10:
             # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
             logger.warning("More than 10 Chromecast devices, only able to select up to 10")
@@ -899,8 +898,11 @@ class InteractivePlayer():  # {
         divider = "-"*66
         print(divider)
         print("Devices:")
-        for i, cc in zip(cc_selectors, ccs):
-            print("",i, "=", cc.name, "(%s)" % cc.model_name)
+        if cc_selectors:
+            for i, cc in zip(cc_selectors, ccs):
+                print("",i, "=", cc.name, "(%s)" % cc.model_name)
+        else:
+                print("  no devices available")
         print()
         print_mapping('- +', 'volume down/up')
         print_mapping('p', 'playfolder')
