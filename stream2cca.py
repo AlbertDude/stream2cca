@@ -702,6 +702,7 @@ class InteractivePlayer():  # {
         self._start_server()
         self._show_key_mappings(self.cc_selectors, self.ccs)
         self._main_loop()
+        logger.warning("Exitted _main_loop")    # Debugging slow quitting
 
     def _start_server(self):
         self.my_server = MyThreadingTCPServer(("", PORT), MyHTTPRequestHandler)
