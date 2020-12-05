@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 stream audio to Chromecast Audio
+TODO:
+    - add ability to select available devices from web-i/f
+    - detect reconnect situation (I think what happens is get callback for track ended...)
 """
 import argparse
 import datetime
@@ -688,18 +691,36 @@ class InteractivePlayer():  # {
         self._get_devices()
 
     def _get_devices(self):
-        self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
-        self.ccs = self.cc_audios + self.cc_groups
-        if len(self.ccs) > 10:
-            # TODO: perhaps separate: 0-9 as CCAudios, <SHIFT>0-9 as CCGroups
-            logger.warning("More than 10 Chromecast devices, only able to select up to 10")
+        """ Gets chromecast audio devices and groups
+            Modifies:
+              .cc_audios - Chromecast Audio devices
+              .cc_groups - Chromecast groups
+              .cc_key_mapping - dictionary mapping from key -> CC audio or group
+                  - devices ascend from 1 in alphabetic order
+                  - groups descend from 0 in alphabetic order
 
-        digits = [str(i) for i in range(10)]    # ['0', '1', ..., '9']
-        self.cc_selectors = digits[:len(self.ccs)]
+        """
+        self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
+
+        # sort the lists alphabetically by name
+        self.cc_audios.sort(key=lambda x: x.name)
+        self.cc_groups.sort(key=lambda x: x.name)
+
+        # current mapping scheme has a limit of 10 devices and groups
+        MAX_LIMIT = 10
+        assert len(self.cc_audios) + len(self.cc_groups) <= MAX_LIMIT, "Update code to handle more than 10 CCA devices and groups"
+
+        # NOTE: this code will fail for more than 10 devices+groups
+        keys = [str((i+1)%10) for i in range(10)]   # ['1', ..., '9', '0']
+        self.cc_key_mapping = dict(zip(keys, self.cc_audios))
+        self.cc_key_mapping.update(dict(zip(reversed(keys), self.cc_groups)))
+
+        #print("LEN", len(self.cc_key_mapping))
+        #print(self.cc_key_mapping)
 
     def start(self):
         self._start_server()
-        self._show_key_mappings(self.cc_selectors, self.ccs)
+        self._show_key_mappings(self.cc_key_mapping)
         self._main_loop()
         logger.warning("Exitted _main_loop")    # Debugging slow quitting
 
@@ -765,8 +786,8 @@ class InteractivePlayer():  # {
                     break
 
                 # select CC: 0, 1, ...
-                if k in self.cc_selectors:
-                    cc  = self.ccs[int(k)]
+                if k in self.cc_key_mapping:
+                    cc  = self.cc_key_mapping[k]
                     self.cas = CcAudioStreamer(cc)
                     print("Selected:", cc.name, "(%s)"%cc.model_name)
 
@@ -802,7 +823,7 @@ class InteractivePlayer():  # {
                 elif k == '?':
                     print("Help")
                     self._get_devices()
-                    self._show_key_mappings(self.cc_selectors, self.ccs)
+                    self._show_key_mappings(self.cc_key_mapping)
 
                 # unused:
                 else:
@@ -890,7 +911,10 @@ class InteractivePlayer():  # {
     # }
 
     @staticmethod
-    def _show_key_mappings(cc_selectors, ccs):  # {
+    def _show_key_mappings(cc_key_mapping):  # {
+        """
+           cc_key_mapping - dictionary mapping from key -> CC audio or group
+        """
 
         def print_mapping(keys, descr):
             print("%s = %s" % (keys.center(5), descr))
@@ -898,9 +922,9 @@ class InteractivePlayer():  # {
         divider = "-"*66
         print(divider)
         print("Devices:")
-        if cc_selectors:
-            for i, cc in zip(cc_selectors, ccs):
-                print("",i, "=", cc.name, "(%s)" % cc.model_name)
+        if len(cc_key_mapping) > 0:
+            for k, cc in cc_key_mapping.items():
+                print("", k, "=", cc.name, "(%s)" % cc.model_name)
         else:
                 print("  no devices available")
         print()
