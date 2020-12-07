@@ -2,8 +2,10 @@
 """
 stream audio to Chromecast Audio
 TODO:
-    - add ability to select available devices from web-i/f
     - detect reconnect situation (I think what happens is get callback for track ended...)
+      - test the implementation of this
+      - update web page to handle the connected status value
+    - add ability to select available devices from web-i/f
 """
 import argparse
 import datetime
@@ -126,12 +128,12 @@ class CcAudioStreamer():  # {
 
         logger.info("..done")
         return cc_audios, cc_groups
-
     def __init__(self, cc_device, **kwargs):
         """
         """
         self.cc = cc_device
         self.cc.wait()
+        self.new_media_status_callback = kwargs.get('new_media_status_callback', None)
         self.mc = None
         self.state = 'UNKNOWN'
         self.prev_playing_interrupted = datetime.datetime.now()
@@ -171,19 +173,24 @@ class CcAudioStreamer():  # {
             if self.playlist_index < 0:
                 self.playlist_index = len(self.playlist) - 1
 
-    def new_media_status(self, status):
+    def new_media_status(self, status):  # {
         """ status listener implementation
             this method is called by media controller
             - it is registered via the call: self.mc.register_status_listener(self)
         """
 
+        # (status.player_state == 'IDLE' and status.idle_reason == 'FINISHED')
+        # - is a normal case indicating the song previously playing has completed
+        # - i.e. device is IDLE because it FINISHED
         if status is None or (status.player_state == 'IDLE' and status.idle_reason == 'FINISHED'):
             if self.state != 'IDLE':
+                # typically self.state == 'PLAYING' -- indicating we were playing a song
                 self.verbose_logger("Status: FINISHED")
                 self.state = 'IDLE'
-                # playout the playlist if it exists
+                # play the next playlist entry if that's what we were doing (indicated by valid playlist)
                 if self.playlist:
                     self.incr_playlist_index()
+                    logger.info("Advancing PlayList to Track#: %d/%d" % (self.playlist_index, len(self.playlist)))
                     self.play(self.playlist[self.playlist_index], verbose_listener = self.verbose_listener)
         elif status.player_state == 'IDLE' and status.idle_reason == 'CANCELLED':
             if self.state != 'IDLE':
@@ -226,6 +233,11 @@ class CcAudioStreamer():  # {
 #           except StopIteration:
 #               self.cc.quit_app()
 #               self.cc.__del__()
+
+        # if caller specified a listener/callback, call that
+        if self.new_media_status_callback:
+            self.new_media_status_callback()
+    # }
 
     def play_list(self, filelist, verbose_listener=False):
         """
@@ -616,7 +628,10 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 - duration ("--:--")
                 - paused ("1")
             """
-            statuses = thePlayer.get_status()
+            # TODO: do something with the connected value
+            ret = thePlayer.get_status()
+            connected = ret[0]
+            statuses = ret[1:]
             try:
                 status = "\n".join(statuses)
             except TypeError:
@@ -687,6 +702,7 @@ class InteractivePlayer():  # {
     def __init__(self, playlist_folder):
         self.playlist_folder = playlist_folder
         self.cas = None     # CC Audio Streamer
+        self.connected = False
 
         self._get_devices()
 
@@ -730,6 +746,14 @@ class InteractivePlayer():  # {
         logger.info("Server started")
         print("Server started")
 
+    def _new_media_status_callback(self):  # {
+        """ callback fcn to hook into CAS's new_media_status
+            register this method wth CAS so that cas.new_media_status() calls this fcn
+        """
+        # cas.new_media_status() getting called means we're connected to the ChromeCast
+        self.connected = True
+    # }
+
     def _main_loop(self):  # {
         with NonBlockingConsole() as nbc:  # {
             while True:  # {
@@ -737,34 +761,41 @@ class InteractivePlayer():  # {
                 _clear_line2()
 
                 statuses = self.get_status()
-                device, volume, artist, title, album, current_time, duration, paused = statuses
+                connected, device, volume, artist, title, album, current_time, duration, paused = statuses
                 if device == "":
-                    status = "Not connected to a device:"
+                    # This branch taken at startup when no device or group is selected
+                    status = "Select device or group:"
                 else:
-                    # Ideally would use these from "Misc Technical" but the PLAY doesn't display properly with my default mac font
-                    # http://unicode.org/charts/PDF/U2300.pdf
-#                   PLAY_CH = "\u23f5"
-#                   PAUSE_CH = "\u23f8"
-#                   STOP_CH = "\u23f9"
+                    if connected:  # {
 
-                    # Instead, use "Block Elements":
-                    # http://unicode.org/charts/PDF/U2580.pdf
-                    PLAY_CH  = " \u25b6"
-                    PAUSE_CH = "\u258c\u258c"
-                    STOP_CH  = " \u2587"
+                        # Ideally would use these from "Misc Technical" but the PLAY doesn't display properly with my default mac font
+                        # http://unicode.org/charts/PDF/U2300.pdf
+    #                   PLAY_CH = "\u23f5"
+    #                   STOP_CH = "\u23f9"
+    #                   PAUSE_CH = "\u23f8"
 
-                    status = "%s: %s: " % (device, volume)
-                    if artist == "" and title == "" and album == "" and current_time == "" and duration == "":
-                        status += "%s " % STOP_CH
-                    else:
-                        if paused == "1":
-                            play_pause_ch = PAUSE_CH
+                        # Instead, use "Block Elements" and the double vertical line:
+                        # http://unicode.org/charts/PDF/U2580.pdf
+                        PLAY_CH  = "\u25b6" # ▶
+                        STOP_CH  = "\u25a0" # ■
+                        PAUSE_CH = "\u2016" # ‖
+
+                        status = "%s: %s: " % (device, volume)
+                        if artist == "" and title == "" and album == "" and current_time == "" and duration == "":
+                            status += "%s " % STOP_CH
                         else:
-                            play_pause_ch = PLAY_CH
-                        status += "%s " % play_pause_ch
+                            if paused == "1":
+                                play_pause_ch = PAUSE_CH
+                            else:
+                                play_pause_ch = PLAY_CH
+                            status += "%s " % play_pause_ch
 
-                        status += "%s - %s (%s): " % (artist, title, album)
-                        status += "%s/%s " % (current_time, duration)
+                            status += "%s - %s (%s): " % (artist, title, album)
+                            status += "%s/%s " % (current_time, duration)
+                    # }
+                    else:
+                        DISCONNECTED_CH = "\u2716"  # ✖
+                        status = "%s: %s " % (device, DISCONNECTED_CH)
                 status += ">"
                 print("\r%s " % status, end='')
 
@@ -788,7 +819,8 @@ class InteractivePlayer():  # {
                 # select CC: 0, 1, ...
                 if k in self.cc_key_mapping:
                     cc  = self.cc_key_mapping[k]
-                    self.cas = CcAudioStreamer(cc)
+                    self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
+                    self.connected = True   # Assume connection OK
                     print("Selected:", cc.name, "(%s)"%cc.model_name)
 
                 # vol up & down
@@ -862,8 +894,8 @@ class InteractivePlayer():  # {
             #interactive_print("Prev track")
 
     def get_status(self):  # {
-        """ returns status as 7-element tuple
-            - device, volume, artist, title, album, current_time, duration
+        """ returns status as 8-element tuple
+            - connected, device, volume, artist, title, album, current_time, duration
         """
         device = ""
         volume = ""
@@ -875,39 +907,40 @@ class InteractivePlayer():  # {
         paused = ""
         if self.cas:
             device = self.cas.get_name()
+            if self.connected:  # {
 
-            muted, pre_muted_vol = self.cas.get_muted()
-            # unicode speaker characters
-            SPEAKER = "\U0001F508"
-            SPEAKER_1 = "\U0001F509"
-            SPEAKER_3 = "\U0001F50A"
-            SPEAKER_MUTE = "\U0001F507"
-            if muted:
-                volume = SPEAKER_MUTE + "%03d" % int(100 * pre_muted_vol + 0.5)
-            else:
-                volume = SPEAKER_3 + "%03d" % int(100 * self.cas.get_vol() + 0.5)
-
-            track_info = self.cas.get_track_info()
-            if not track_info is None:
-                if track_info != "":
-                    artist, title, album, current_time, duration = track_info
-#                   track_status = "%s - %s (%s)" % (artist, title, album)
-#                   playback_status = "%s/%s " % (current_time, duration)
-            else:
-                device = "Disconnected from device:"
-                print("Disconnected from device:")
-                self.cas = None
-
-            try:
-                if self.cas.get_paused():
-                    paused = "1"
+                muted, pre_muted_vol = self.cas.get_muted()
+                # unicode speaker characters
+                SPEAKER = "\U0001F508"
+                SPEAKER_1 = "\U0001F509"
+                SPEAKER_3 = "\U0001F50A"
+                SPEAKER_MUTE = "\U0001F507"
+                if muted:
+                    volume = SPEAKER_MUTE + "%03d" % int(100 * pre_muted_vol + 0.5)
                 else:
-                    paused = "0"
-            except AttributeError:
-                # think this can occur if self.cas happens to die in the midst
-                pass
+                    volume = SPEAKER_3 + "%03d" % int(100 * self.cas.get_vol() + 0.5)
 
-        return device, volume, artist, title, album, current_time, duration, paused
+                track_info = self.cas.get_track_info()
+                if track_info is None:
+                    print("Disconnected from device:")
+                    self.connected = False  # TODO: might not need this...
+                else:
+                    if track_info != "":
+                        artist, title, album, current_time, duration = track_info
+    #                   track_status = "%s - %s (%s)" % (artist, title, album)
+    #                   playback_status = "%s/%s " % (current_time, duration)
+
+                try:
+                    if self.cas.get_paused():
+                        paused = "1"
+                    else:
+                        paused = "0"
+                except AttributeError:
+                    # think this can occur if self.cas happens to die in the midst
+                    pass
+            # }
+
+        return self.connected, device, volume, artist, title, album, current_time, duration, paused
     # }
 
     @staticmethod
@@ -921,7 +954,7 @@ class InteractivePlayer():  # {
 
         divider = "-"*66
         print(divider)
-        print("Devices:")
+        print("Chromecast Audio Devices and Cast Groups:")
         if len(cc_key_mapping) > 0:
             for k, cc in cc_key_mapping.items():
                 print("", k, "=", cc.name, "(%s)" % cc.model_name)
