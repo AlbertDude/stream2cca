@@ -33,7 +33,6 @@ function vol_toggle_mute(){
 
 function vol_down(){
     //alert("Vol - from JS");
-    //document.getElementById('status0').firstChild.textContent="Vol - from JS";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -49,7 +48,6 @@ function vol_down(){
 
 function vol_up(){
     //alert("Vol + from JS");
-    //document.getElementById('status0').firstChild.textContent="Vol + from JS";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -64,7 +62,6 @@ function vol_up(){
 }
 
 function prev_track(){
-    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -79,7 +76,6 @@ function prev_track(){
 }
 
 function next_track(){
-    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -94,7 +90,6 @@ function next_track(){
 }
 
 function toggle_pause(){
-    //document.getElementById('status0').firstChild.textContent="Pause/Resume Toggle";
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -148,7 +143,7 @@ function get_status(){
                 return track_status;
             }
 
-            [device, volume, artist, title, album, current_time, duration, paused] = status_array;
+            [connected, device, volume, artist, title, album, current_time, duration, paused] = status_array;
 
             if (current_time.length > 0 && duration.length > 0) {
                 playback_len = current_time.length + duration.length + 1;
@@ -163,20 +158,24 @@ function get_status(){
             // 0123456789012345678901234567890123456789
             // device_name        vol       ee:ee/dd:dd
             line0_len = device.length + volume.length + playback_len;
-//          console.log("line0:" + device.length + volume.length + playback_len);
             device = BOLD + device + BOLD_END;
-            if (line0_len >= MAX_LEN - 2) {
-                line0 = device + NBSP + volume + NBSP + playback;
+            if (connected == "1") {
+                if (line0_len >= MAX_LEN - 2) {
+                    line0 = device + NBSP + volume + NBSP + playback;
+                }
+                else {
+                    spacer0_len = Math.floor((MAX_LEN - line0_len) / 2);
+                    spacer1_len = MAX_LEN - line0_len - spacer0_len;
+                    spacer0 = NBSP.repeat(spacer0_len);
+                    spacer1 = NBSP.repeat(spacer1_len);
+                    line0 = device + spacer0 + volume + spacer1 + playback;
+    //              console.log("Spacers:" + spacer0_len + spacer1_len)
+                }
             }
             else {
-                spacer0_len = Math.floor((MAX_LEN - line0_len) / 2);
-                spacer1_len = MAX_LEN - line0_len - spacer0_len;
-                spacer0 = NBSP.repeat(spacer0_len);
-                spacer1 = NBSP.repeat(spacer1_len);
-                line0 = device + spacer0 + volume + spacer1 + playback;
-//              console.log("Spacers:" + spacer0_len + spacer1_len)
+                DISCONNECTED_CH = "\u2716"; // ✖
+                line0 = device + " " + DISCONNECTED_CH;
             }
-            //document.getElementById('status0').firstChild.textContent = line0;
             document.getElementById('status0').innerHTML = line0;
 
             // status line 1:
@@ -187,30 +186,25 @@ function get_status(){
                 this.scroll_index = 0;
             }
 
-            //track_status = "%s - %s (%s)" % (artist, title, album)
-            track = artist + " - " + title + " (" + album + ")";
-// Problem with formatted track status is the scroller implmentations ...
-//          track = BOLD + artist + BOLD_END + " - " + title + ITALIC + " (" + album + ")" + ITALIC_END;
-            track_len = artist.length + title.length + album.length + 6;
-
             track_status = "";
             full_track_status = "";
-            if (track_len > 0) {
-                full_track_status = track.split(' ').join(NBSP);
-                if (track_len <= MAX_LEN) {
-                    track_status = full_track_status;
-                }
-                else {
-                    track_status = scroll_text(full_track_status);
 
-//                  // Initialize a static variable for initial timestamp
-//                  if (typeof this.init_time == 'undefined') {
-//                      this.init_time = Date.now();
-//                  }
-//                  console.log(Math.round((Date.now() - self.init_time)/1000), this.scroll_index);
+            if (connected == "1") {
+                // "ARTIST - TITLE (ALBUM)"
+                // Unfortunately: scroller implmentations doesn't like formatted text...
+                // track = BOLD + artist + BOLD_END + " - " + title + ITALIC + " (" + album + ")" + ITALIC_END;
+                track = artist + " - " + title + " (" + album + ")";
+                track_len = artist.length + title.length + album.length + 6;
+                if (track_len > 0) {
+                    full_track_status = track.split(' ').join(NBSP);
+                    if (track_len <= MAX_LEN) {
+                        track_status = full_track_status;
+                    }
+                    else {
+                        track_status = scroll_text(full_track_status);
+                    }
                 }
             }
-            //document.getElementById('status1').firstChild.textContent = track_status;
             document.getElementById('status1').innerHTML = track_status;
 
             // set play/pause button image appropriately
@@ -226,15 +220,20 @@ function get_status(){
                 this.prev_track_status = "";
             }
 
-            // refresh img if track has changed
-            if (this.prev_track_status.localeCompare(full_track_status) != 0) {
-                // filter out spurious assignments of 'undefined' 
-                // (not sure why we get these...)
-                if ("undefined".localeCompare(full_track_status) != 0) {
-                    console.log("Track status changed to: " + full_track_status)
-                    refresh_img();
-                    this.prev_track_status = full_track_status;
+            if (connected == "1") {
+                // refresh img if track has changed
+                if (this.prev_track_status.localeCompare(full_track_status) != 0) {
+                    // filter out spurious assignments of 'undefined' 
+                    // (not sure why we get these...)
+                    if ("undefined".localeCompare(full_track_status) != 0) {
+                        console.log("Track status changed to: " + full_track_status)
+                        refresh_img();
+                        this.prev_track_status = full_track_status;
+                    }
                 }
+            }
+            else {
+                disable_img();
             }
         }
     }
@@ -245,5 +244,10 @@ function refresh_img(){
     // - also requires some Cache-Control headers from the server
     // see: https://stackoverflow.com/questions/1077041/refresh-image-with-a-new-one-at-the-same-url
     document.getElementById('cover_art').src="cover.jpg#" + Date.now();
+    document.getElementById('cover_art').style.visibility = 'visible';
+}
+
+function disable_img(){
+    document.getElementById('cover_art').style.visibility = 'hidden';
 }
 

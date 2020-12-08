@@ -619,6 +619,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         def get_status():
             """
                 sends response with status information composed of 8 elements, separated by "\n"
+                - connected ("0"|"1")
                 - device ("device name")
                 - volume (000-100)
                 - artist
@@ -628,14 +629,11 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 - duration ("--:--")
                 - paused ("1")
             """
-            # TODO: do something with the connected value
-            ret = thePlayer.get_status()
-            connected = ret[0]
-            statuses = ret[1:]
+            statuses = thePlayer.get_status()
             try:
                 status = "\n".join(statuses)
             except TypeError:
-                statuts = "\n".join(["??"]*7)
+                status = "\n".join(["??"]*7)
             bstatus = status.encode()
             self.send_header("Content-Length", str(len(bstatus)))
             self.end_headers()
@@ -766,7 +764,7 @@ class InteractivePlayer():  # {
                     # This branch taken at startup when no device or group is selected
                     status = "Select device or group:"
                 else:
-                    if connected:  # {
+                    if connected == "1":  # {
 
                         # Ideally would use these from "Misc Technical" but the PLAY doesn't display properly with my default mac font
                         # http://unicode.org/charts/PDF/U2300.pdf
@@ -923,7 +921,7 @@ class InteractivePlayer():  # {
                 track_info = self.cas.get_track_info()
                 if track_info is None:
                     print("Disconnected from device:")
-                    self.connected = False  # TODO: might not need this...
+                    self.connected = False
                 else:
                     if track_info != "":
                         artist, title, album, current_time, duration = track_info
@@ -940,7 +938,8 @@ class InteractivePlayer():  # {
                     pass
             # }
 
-        return self.connected, device, volume, artist, title, album, current_time, duration, paused
+        connected = "1" if self.connected else "0"
+        return connected, device, volume, artist, title, album, current_time, duration, paused
     # }
 
     @staticmethod
