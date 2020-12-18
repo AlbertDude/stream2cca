@@ -19,3 +19,103 @@ html *
     width:200px;
 }
 
+
+//-----------------------------------------------------------------
+// Tooltip stuff
+//-----------------------------------------------------------------
+.tooltip {
+    position: relative;
+    display: inline-block;
+    border-bottom: 1px dotted black;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 200px;
+    background-color: #a0a0a0;
+    color: #fff;
+    text-align: center;
+    padding: 5px 0;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 100%;
+
+    /* Position the tooltip */
+    position: absolute;
+    z-index: 1;
+    /* bottom: 100%;   /* supposed to make it appear above but doesn't work -- results in no tooltip!*/
+    left: 50%;
+    margin-left: -100px;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+}
+
+//-----------------------------------------------------------------
+// Dropdown stuff
+//-----------------------------------------------------------------
+
+/* The container <div> - needed to position the dropdown content */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* The status displays are actually buttons */
+/* non-clickable variety */
+.statusbtn {
+    background-color: grey;
+    height: 35px;
+    border: none;
+    padding: 0px 0px;
+}
+
+/* clickable variety */
+.statusbtn-clickable {
+    background-color: grey;
+    height: 35px;
+    border: none;
+    padding: 0px 0px;
+}
+
+/* Change the background color of the dropdown BUTTON when the dropdown content is shown */
+.statusbtn-clickable:hover, .statusbtn-clickable:focus {
+    background-color: #909090;
+}
+
+/* Dropdown Content (Hidden by Default) */
+.dropdown-content {
+    /*display: none;*/
+    position: absolute;
+    background-color: #90a090;
+    min-width: 160px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+}
+
+/* Links inside the dropdown */
+/*
+.dropdown-content a {
+    color: black;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+}
+*/
+
+/* Show the dropdown menu on hover */
+/*
+.dropdown:hover .dropdown-content {
+    display: block;
+}
+*/
+
+/* Change color of dropdown links on hover */
+/*
+// this doesn't seem to work
+.dropdown-content a:hover {
+    background-color: #900000;
+}
+*/
+

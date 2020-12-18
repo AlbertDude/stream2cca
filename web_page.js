@@ -14,8 +14,12 @@ else {
 
 
 // regularly call get_status() every 1000 ms
-var status_interval = setInterval(get_status, 1000);
+var status_interval;
+set_status_interval();
 
+function set_status_interval(){
+    status_interval = setInterval(get_status, 1000);
+}
 
 function vol_toggle_mute(){
     Http = new XMLHttpRequest();
@@ -89,11 +93,11 @@ function next_track(){
     }
 }
 
-function toggle_pause(){
+function play_pause(){
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-    Http.send("toggle_pause");
+    Http.send("play_pause");
 
     // refresh status upon server response
     Http.onreadystatechange = (e) => {
@@ -178,6 +182,20 @@ function get_status(){
             }
             document.getElementById('status0').innerHTML = line0;
 
+            if ((connected == "0") || (playback == "")){
+                document.getElementById('play_pause_img').src = "imgs/ipod-old.png";
+            }
+            else {
+                // set play/pause button image appropriately
+                if (paused == "0") {
+                    document.getElementById('play_pause_img').src = "imgs/icons8-pause-button-96.png";
+                }
+                else {
+                    document.getElementById('play_pause_img').src = "imgs/icons8-circled-play-96.png";
+                }
+            }
+
+
             // status line 1:
             // artist - title (album)
 
@@ -207,14 +225,6 @@ function get_status(){
             }
             document.getElementById('status1').innerHTML = track_status;
 
-            // set play/pause button image appropriately
-            if (paused == "0") {
-                document.getElementById('toggle_pause_img').src = "imgs/icons8-pause-button-96.png";
-            }
-            else {
-                document.getElementById('toggle_pause_img').src = "imgs/icons8-circled-play-96.png";
-            }
-
             // Initialize a static variable for previous track
             if (typeof this.prev_track_status == 'undefined') {
                 this.prev_track_status = "";
@@ -226,7 +236,7 @@ function get_status(){
                     // filter out spurious assignments of 'undefined' 
                     // (not sure why we get these...)
                     if ("undefined".localeCompare(full_track_status) != 0) {
-                        console.log("Track status changed to: " + full_track_status)
+                        //console.log("Track status changed to: " + full_track_status)
                         refresh_img();
                         this.prev_track_status = full_track_status;
                     }
@@ -235,6 +245,38 @@ function get_status(){
             else {
                 disable_img();
             }
+        }
+    }
+}
+
+var device_text;
+
+function scan_devices(){
+    // hide dynamicDropdown if it's already showing and skip the scan
+    if (showingDynamicDropdown == 1) {
+        hideDynamicDropdown();
+        return;
+    }
+
+    Http = new XMLHttpRequest();
+    Http.open("POST", url, true);
+    Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+    Http.send("scan_devices");
+
+    // Change the status0 display message
+    NBSP = "\xa0";  // Non-breaking space
+    numSpaces = 14;
+    document.getElementById('status0').innerHTML = NBSP.repeat(numSpaces) + "Scanning..." + NBSP.repeat(numSpaces);
+
+    // set callback to handle server response
+    clearInterval(status_interval); // disable the regular status pings until the response arrives
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            device_text = Http.responseText;
+            //console.log("scan_devices() DONE: " + device_text)
+            showDynamicDropdown()
+
+            set_status_interval(); // done. re-enable regular status pings
         }
     }
 }
@@ -248,6 +290,79 @@ function refresh_img(){
 }
 
 function disable_img(){
-    document.getElementById('cover_art').style.visibility = 'hidden';
+    //document.getElementById('cover_art').style.visibility = 'hidden';
+    document.getElementById('cover_art').src="imgs/noise.jpg";
+    document.getElementById('cover_art').style.visibility = 'visible';
 }
 
+var showingDynamicDropdown = 0;
+
+// Dynamic generation of dropdown
+function showDynamicDropdown() {
+    //Create the new dropdown menu
+    var whereToPut = document.getElementById('dynamicDropdownDiv');
+    var dynamicDropdown = document.createElement('select');
+    dynamicDropdown.setAttribute('class', "dropdown-content");  // TODO: doesn't seem to do anything
+    dynamicDropdown.setAttribute('id', "dynamicDropdown");
+    dynamicDropdown.setAttribute('onchange', "deviceSelected();");
+    whereToPut.appendChild(dynamicDropdown);
+
+    //Add dummy option
+    //- the first option isn't selectable so don't want to put a real one there
+    var optionDummy=document.createElement("option");
+    optionDummy.setAttribute('disabled', "disabled");
+    optionDummy.setAttribute('selected', "selected");
+    optionDummy.text="<-- Select device -->";
+    dynamicDropdown.add(optionDummy, dynamicDropdown.options[null]);
+
+    function createOption(index, device_name){
+        var option = document.createElement("option");
+        option.setAttribute('value', index);
+        option.text = device_name;
+        return option;
+    }
+
+    // add option per device
+    device_array = device_text.split(/\r?\n/);
+    for( const device_spec of device_array){
+        [index, device_name] = device_spec.split(",");
+        //console.log(index, device_name)
+
+        option = createOption(index, device_name);
+        dynamicDropdown.add(option, dynamicDropdown.options[null]);
+    }
+
+    showingDynamicDropdown = 1;
+    document.getElementById('scanDevicesTooltip').innerHTML = "Click to Close Device Selector";
+}
+
+function hideDynamicDropdown() {
+    var d = document.getElementById('dynamicDropdownDiv');
+
+    var oldmenu = document.getElementById('dynamicDropdown');
+
+    d.removeChild(oldmenu);
+    showingDynamicDropdown = 0;
+    document.getElementById('scanDevicesTooltip').innerHTML = "Click to Scan Devices";
+}
+
+function deviceSelected() {
+    var dynamicDropdown = document.getElementById('dynamicDropdown');
+    deviceNum = dynamicDropdown.value;
+
+    // send selected device to server!!
+    Http = new XMLHttpRequest();
+    Http.open("POST", url, true);
+    Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+    Http.send("select_device "+deviceNum);
+
+    // refresh status upon server response
+    Http.onreadystatechange = (e) => {
+        if (Http.readyState === XMLHttpRequest.DONE) {
+            get_status();
+        }
+    }
+
+    hideDynamicDropdown()
+    //console.log("deviceSelected: " + deviceNum);
+}

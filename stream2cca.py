@@ -2,10 +2,9 @@
 """
 stream audio to Chromecast Audio
 TODO:
-    - detect reconnect situation (I think what happens is get callback for track ended...)
-      - test the implementation of this
-      - update web page to handle the connected status value
     - add ability to select available devices from web-i/f
+      - seems working, further testing...
+    - if device not playing, make the toggle_pause button a play folder button
 """
 import argparse
 import datetime
@@ -48,8 +47,7 @@ logger.addHandler(logging_fh)
 logging_ch = logging.StreamHandler()
 logging_ch.setFormatter(logging_formatter)
 logging_ch.setLevel(logging.WARN)
-logger.addHandler(logging_ch)
-
+#logger.addHandler(logging_ch)
 
 
 # helpers
@@ -107,6 +105,12 @@ def _clear_line2():
     """ clears line and places cursor back to start of the line
     """
     print("\r" + " " * 120 + "\r", end='')
+
+
+# globals, overwrite these with proper values
+PLAYLIST_FOLDER = None
+SERVER_DIRECTORY = None
+WEB_PAGE_REL_PATH = None
 
 
 class CcAudioStreamer():  # {
@@ -174,7 +178,7 @@ class CcAudioStreamer():  # {
                 self.playlist_index = len(self.playlist) - 1
 
     def new_media_status(self, status):  # {
-        """ status listener implementation
+        """ status listener/callback implementation
             this method is called by media controller
             - it is registered via the call: self.mc.register_status_listener(self)
         """
@@ -183,6 +187,10 @@ class CcAudioStreamer():  # {
         # - is a normal case indicating the song previously playing has completed
         # - i.e. device is IDLE because it FINISHED
         if status is None or (status.player_state == 'IDLE' and status.idle_reason == 'FINISHED'):
+            # TODO: can get the IP address of the SERVER from: status.content_id
+            # e.g.:
+            # 'http://192.168.0.27:9812/xtest_content/zen_NightBeds/Night%20Beds%20-%20Ramona%20%282013%20Country%20Sleep%20T%2302%29.mp3'
+            # BUT this doesn't help us in IDing the device
             if self.state != 'IDLE':
                 # typically self.state == 'PLAYING' -- indicating we were playing a song
                 self.verbose_logger("Status: FINISHED")
@@ -238,6 +246,19 @@ class CcAudioStreamer():  # {
         if self.new_media_status_callback:
             self.new_media_status_callback()
     # }
+
+    def play_folder(self, play_folder):
+        """ Build list of folder contents and play it
+        """
+        posixPath_list = list(pathlib.Path(play_folder).rglob("*.[mM][pP]3"))
+        if posixPath_list:
+            filelist = [str(pp) for pp in posixPath_list]
+            random.shuffle(filelist)
+            print("Playing folder (%s) with %d files" % (play_folder, len(filelist)))
+
+            self.play_list(filelist)
+        else:
+            print("No files found under play folder: %s" % (play_folder))
 
     def play_list(self, filelist, verbose_listener=False):
         """
@@ -331,16 +352,23 @@ class CcAudioStreamer():  # {
         self._prep_media_controller()
         self.mc.play()
 
-    def toggle_pause(self):
-        """ toggles between pause and resume
+    def play_pause(self):
+        """ multi-functional:
+            - pause (if playing)
+            - resume (if paused)
+            - start folder-play folder (if neither playing or paused)
         """
         prev = self.state
+        new = None
         if self.state == 'PLAYING':
             self.pause()
             new = 'PAUSED'
         elif self.state == 'PAUSED':
             self.resume()
             new = 'RESUMED'
+        else:
+            self.play_folder(PLAYLIST_FOLDER)
+            new = 'PLAYING'
         return prev, new
 
     def get_paused(self):
@@ -435,6 +463,7 @@ class CcAudioStreamer():  # {
                     if elapsed.seconds >= MAX_DURATION_EXCEPTIONS:
                         logger.error("Got %d consecutive update status exceptions over %d seconds, disconnecting.."
                                 % (self.consecutive_update_status_exceptions, elapsed.seconds))
+                        self.state = 'IDLE'
                         return None
                 self.consecutive_update_status_exceptions += 1
             else:
@@ -540,11 +569,6 @@ class NonBlockingConsole():
 #   server-root-directory to the web-page folder
 
 
-# globals, overwrite these with proper values
-PLAYLIST_FOLDER = None
-SERVER_DIRECTORY = None
-WEB_PAGE_REL_PATH = None
-
 
 import http.server
 import socketserver
@@ -616,7 +640,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         content_len = self.headers['Content-Length']
         content = self.rfile.read(int(content_len)).decode('utf-8') if content_len else ""
 
-        def get_status():
+        def get_status():  # {
             """
                 sends response with status information composed of 8 elements, separated by "\n"
                 - connected ("0"|"1")
@@ -639,6 +663,27 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             self.end_headers()
             self.wfile.write(bstatus)
             self.wfile.flush()
+        # }
+
+        def scan_devices():  # {
+            """
+                sends response with device information ... composed of N elements, separated by "\n"
+                - n device_name
+            """
+            logger.info("IN scan_devices")
+
+            devices_dict = thePlayer.scan_devices()
+            devices_list = ["%s,%s" % (k, cc.name) for k, cc in devices_dict.items()]
+            try:
+                devices = "\n".join(devices_list)
+            except TypeError:
+                devices = "\n".join(["??"]*7)
+            bdevices = devices.encode()
+            self.send_header("Content-Length", str(len(bdevices)))
+            self.end_headers()
+            self.wfile.write(bdevices)
+            self.wfile.flush()
+        # }
 
         # dictionary of commands and their respective handlers
         commands = {
@@ -647,19 +692,30 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 "volume_down": thePlayer.volume_down,
                 "prev_track": thePlayer.prev_track,
                 "next_track": thePlayer.next_track,
-                "toggle_pause": thePlayer.toggle_pause,
+                "play_pause": thePlayer.play_pause,
+                "scan_devices": scan_devices,
                 "get_status": get_status,
                 }
-        if content in commands:
+        if (content in commands) or content.startswith("select_device"):
+            # Log incoming commands except for get_status (since they come in every second or so)
+            if not (content == "get_status"):
+                logger.info("Got POST command: %s" % content)
+
             self.send_response(200)  # 200 OK
             self.send_header('Content-type', 'text/plain')
-            # TODO: HACKY! special handling for get_status()
-            # - don't log get_status() since they come in every 1000 ms
-            if content != "get_status":
+
+            # special handling for 'get_status' and 'scan_devices' since they send data back to web page
+            if not (content == "get_status" or content == "scan_devices"):
                 self.end_headers()
-                logger.info("Got POST command: %s" % content)
-            if commands[content]:
+
+            # special handling for "select_device X"
+            if content.startswith("select_device"):
+                device_num = content.split(" ")[1]
+                thePlayer.set_device(device_num)
+
+            elif commands[content]:
                 commands[content]()
+
         else:
             self.send_response(400)  # 400 Bad Request
             self.end_headers()
@@ -731,6 +787,20 @@ class InteractivePlayer():  # {
 
         #print("LEN", len(self.cc_key_mapping))
         #print(self.cc_key_mapping)
+
+    def scan_devices(self):
+        self._get_devices()
+        self._show_key_mappings(self.cc_key_mapping)
+        return self.cc_key_mapping
+
+    def set_device(self, device_key):
+        cc  = self.cc_key_mapping[device_key]
+        if self.cas and (self.cas.get_name() == cc.name):
+            print("Already connected to:", cc.name, "(%s)"%cc.model_name)
+            return
+        print("Selected:", cc.name, "(%s)"%cc.model_name)
+        self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
+        self.connected = True   # Assume connection OK
 
     def start(self):
         self._start_server()
@@ -816,10 +886,7 @@ class InteractivePlayer():  # {
 
                 # select CC: 0, 1, ...
                 if k in self.cc_key_mapping:
-                    cc  = self.cc_key_mapping[k]
-                    self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
-                    self.connected = True   # Assume connection OK
-                    print("Selected:", cc.name, "(%s)"%cc.model_name)
+                    self.set_device(k)
 
                 # vol up & down
                 elif k == '+' or k == '=':
@@ -827,22 +894,13 @@ class InteractivePlayer():  # {
                 elif k == '-' or k == '_':
                     self.volume_down()
 
-                # toggle pause/resume: <space>
+                # pause/resume/play-folder: <space>
                 elif k == ' ':
-                    self.toggle_pause()
+                    self.play_pause()
 
-                # play folder: p
+                # play-folder: p
                 elif k == 'p':
-                    if self.cas:
-                        posixPath_list = list(pathlib.Path(self.playlist_folder).rglob("*.[mM][pP]3"))
-                        if posixPath_list:
-                            filelist = [str(pp) for pp in posixPath_list]
-                            random.shuffle(filelist)
-                            print("Playing playlist folder (%s) with %d files" % (self.playlist_folder, len(filelist)))
-
-                            self.cas.play_list(filelist)
-                        else:
-                            print("No files found under playlist folder: %s" % (self.playlist_folder))
+                    self.play_folder()
 
                 # next & prev track
                 elif k == '>' or k == '.':
@@ -852,8 +910,7 @@ class InteractivePlayer():  # {
 
                 elif k == '?':
                     print("Help")
-                    self._get_devices()
-                    self._show_key_mappings(self.cc_key_mapping)
+                    self.scan_devices()
 
                 # unused:
                 else:
@@ -876,10 +933,14 @@ class InteractivePlayer():  # {
             prev, new = self.cas.vol_down(0.05)
             #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
-    def toggle_pause(self):
+    def play_pause(self):
         if self.cas:
-            prev, new = self.cas.toggle_pause()
+            prev, new = self.cas.play_pause()
             #interactive_print(new, clear_line=True)
+
+    def play_folder(self):
+        if self.cas:
+            self.cas.play_folder(self.playlist_folder)
 
     def next_track(self):
         if self.cas:
@@ -963,7 +1024,7 @@ class InteractivePlayer():  # {
         print_mapping('- +', 'volume down/up')
         print_mapping('p', 'playfolder')
         print_mapping(',< >.', 'previous/next track')
-        print_mapping('SPACE', 'pause/resume')
+        print_mapping('SPACE', 'pause/resume/playfolder')
         print_mapping('q', 'quit')
         print_mapping('?', 'show key mappings')
         print(divider)
@@ -1068,11 +1129,13 @@ def main(args):  # {
 
         # play folder
         if command == 'playfolder':
-            posixPath_list = list(pathlib.Path(PLAYLIST_FOLDER).rglob("*.[mM][pP]3"))
-            filelist = [str(pp) for pp in posixPath_list]
-            random.shuffle(filelist)
-            print("Playing playlist with %d files:" % len(filelist), filelist)
-            cas.play_list(filelist)
+#           posixPath_list = list(pathlib.Path(PLAYLIST_FOLDER).rglob("*.[mM][pP]3"))
+#           filelist = [str(pp) for pp in posixPath_list]
+#           random.shuffle(filelist)
+#           print("Playing playlist with %d files:" % len(filelist), filelist)
+#           cas.play_list(filelist)
+            cas.play_folder(PLAYLIST_FOLDER)
+
             prev_len_playlist = 0
             cur_playlist = cas.get_playlist()
             while cur_playlist:

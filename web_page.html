@@ -13,17 +13,28 @@
         <button class="buttons" type="button" onclick=vol_down()><img src="imgs/icons8-audio-down-96.png"></button>
         <button class="buttons" type="button" onclick=vol_up()><img src="imgs/icons8-audio-96.png"></button>
 
-        <p> </p>
-        <button class="buttons" type="button" onclick=toggle_pause()><img id='toggle_pause_img' src="imgs/icons8-pause-button-96.png"></button>
+        <br>
+        <br>
+
+        <button class="buttons" type="button" onclick=play_pause()><img id='play_pause_img' src="imgs/icons8-pause-button-96.png"></button>
         <button class="buttons" type="button" onclick=prev_track()><img src="imgs/icons8-rewind-button-round-96.png"></button>
         <button class="buttons" type="button" onclick=next_track()><img src="imgs/icons8-fast-forward-round-96.png"></button>
 
-        <p> </p>
-        <p id='status0'> </p>
-        <p id='status1'> </p>
-        <p id='status2'> </p>
+        <br>
+        <br>
 
-        <img id='cover_art' src="cover.jpg" alt="Cover Art" style="height:630px;">
+        <div class="dropdown tooltip" id="dropdownDiv">
+          <button class="statusbtn-clickable" id='status0' onclick=scan_devices()></button>
+          <div class="tooltiptext" id="scanDevicesTooltip">Click to Scan Devices</div>
+        </div>
+        <br>
+        <button class="statusbtn" id='status1'></button>
+        <div id="dynamicDropdownDiv"></div>
+
+        <br>
+        <br>
+
+        <img id='cover_art' src="cover.jpg" alt="Cover Art" style="height:630px;" title="Cover Art">
     </body>
 
     <script src="ip_address.js"></script>
