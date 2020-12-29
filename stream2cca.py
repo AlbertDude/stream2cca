@@ -20,6 +20,18 @@ import threading
 import time
 import urllib
 
+# TODO: Attempt to debug the SEG-FAULT
+# - to get stacktrace from SEG-FAULT, as from: https://stackoverflow.com/questions/10035541/what-causes-a-python-segmentation-fault
+# - since we're using pyenv w/ system python install = /usr/bin/python (can check via: pyenv which python):
+#
+# gdb /usr/bin/python
+# (gdb) run stream2cca.py -f ../../ZPL
+# ## wait for segfault ##
+# (gdb) backtrace
+# ## stack trace of the c code
+#
+import sys
+sys.settrace
 
 # configure logging
 
@@ -122,7 +134,20 @@ class CcAudioStreamer():  # {
         """
         logger.info("Getting devices..")
         # get chromecasts
-        ccs, browser = pychromecast.get_chromecasts()
+        # - API varies depending on PyChromecast version
+        #  - doesn't seem to be way to determine PyChromecast version:
+        #  - __version__ and __version_info__ indicate 0.7.6 for both PyChromecast 6.0.0 and (latest) 7.7.1
+        #  - so we write code to handle either API
+        # - for PyChromecast 7.7.1
+        #   ccs, browser = pychromecast.get_chromecasts()
+        # - for PyChromecast 6.0.0
+        #   ccs = pychromecast.get_chromecasts()
+        ret = pychromecast.get_chromecasts()
+        if isinstance(ret, tuple):
+            ccs, browser = ret
+        else:
+            assert isinstance(ret, list)
+            ccs = ret
 
         # get audios
         cc_audios = [cc for cc in ccs if cc.cast_type=='audio']
@@ -576,12 +601,27 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
     """ Subclass to:
         - serve files from specific directory
         - redirect log_message to logger (rather than screen)
+
+        NOTE: this class gets instantiated for every HTTP request received
+        - i.e. every incoming HTTP request gets its own handler instance
+        - this since server needs to support asynchronous requests
     """
     def __init__(self, *args, **kwargs):
-        # TODO: why does this get called every second!!!
-
         try:
-            super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
+            # Support for different python versions
+            assert sys.version_info.major >= 3
+            if sys.version_info.minor >= 7:
+                # directory param was added in python 3.7
+                # see: https://docs.python.org/3.7/library/http.server.html
+                # in this case typically run from ~/Projects/stream2cca (and script sets SERVER_DIRECTORY to common parent folder)
+                #   stream2cca.py ../../ZPL
+                super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
+            else:
+                # no directory param in python <= 3.6
+                # see: https://docs.python.org/3.6/library/http.server.html
+                # in this case server serves file from working directory and so need to run from ~
+                #   Projects/stream2cca/stream2cca.py ZPL
+                super().__init__(*args, **kwargs)
         except BrokenPipeError as error:
             logger.warning("Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!")
             logger.warning("  %s" % error)

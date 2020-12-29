@@ -1,0 +1,5 @@
+###### Python Package Requirements for stream2cca.py ######
+# install with:
+# python -m pip install -r requirements.txt
+mutagen
+PyChromecast
