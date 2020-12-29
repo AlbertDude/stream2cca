@@ -93,11 +93,11 @@ function next_track(){
     }
 }
 
-function play_pause(){
+function play_pause_resume(){
     Http = new XMLHttpRequest();
     Http.open("POST", url, true);
     Http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-    Http.send("play_pause");
+    Http.send("play_pause_resume");
 
     // refresh status upon server response
     Http.onreadystatechange = (e) => {

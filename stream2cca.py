@@ -2,10 +2,14 @@
 """
 stream audio to Chromecast Audio
 TODO:
-    - add ability to select available devices from web-i/f
-      - seems working, further testing...
-    - if device not playing, make the toggle_pause button a play folder button
+    - investigate SEGMENTATION FAULT
+    - continue using/testing:
+        - ability to select available devices from web-i/f
+          - seems working, further testing...
+        - if device not playing, make the toggle_pause button a play folder button
 """
+
+
 import argparse
 import datetime
 import logging
@@ -132,10 +136,12 @@ class CcAudioStreamer():  # {
 
         logger.info("..done")
         return cc_audios, cc_groups
+
     def __init__(self, cc_device, **kwargs):
         """
         """
-        self.cc = cc_device
+        # TODO: see if we should be calling self.cc.disconnect() at some point
+        self.cc = cc_device     # of type pychromecast.Chromecast
         self.cc.wait()
         self.new_media_status_callback = kwargs.get('new_media_status_callback', None)
         self.mc = None
@@ -352,11 +358,11 @@ class CcAudioStreamer():  # {
         self._prep_media_controller()
         self.mc.play()
 
-    def play_pause(self):
+    def play_pause_resume(self):
         """ multi-functional:
             - pause (if playing)
             - resume (if paused)
-            - start folder-play folder (if neither playing or paused)
+            - play folder (if neither playing or paused)
         """
         prev = self.state
         new = None
@@ -569,17 +575,17 @@ class NonBlockingConsole():
 #   server-root-directory to the web-page folder
 
 
-
 import http.server
 import socketserver
 class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
     """ Subclass to:
         - serve files from specific directory
         - redirect log_message to logger (rather than screen)
+        Note:
+        - this class is passed to the HTTP server which will instantiate this class for each request
+          received
     """
     def __init__(self, *args, **kwargs):
-        # TODO: why does this get called every second!!!
-
         try:
             super().__init__(*args, directory=SERVER_DIRECTORY, **kwargs)
         except BrokenPipeError as error:
@@ -692,7 +698,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 "volume_down": thePlayer.volume_down,
                 "prev_track": thePlayer.prev_track,
                 "next_track": thePlayer.next_track,
-                "play_pause": thePlayer.play_pause,
+                "play_pause_resume": thePlayer.play_pause_resume,
                 "scan_devices": scan_devices,
                 "get_status": get_status,
                 }
@@ -896,7 +902,7 @@ class InteractivePlayer():  # {
 
                 # pause/resume/play-folder: <space>
                 elif k == ' ':
-                    self.play_pause()
+                    self.play_pause_resume()
 
                 # play-folder: p
                 elif k == 'p':
@@ -933,9 +939,9 @@ class InteractivePlayer():  # {
             prev, new = self.cas.vol_down(0.05)
             #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
-    def play_pause(self):
+    def play_pause_resume(self):
         if self.cas:
-            prev, new = self.cas.play_pause()
+            prev, new = self.cas.play_pause_resume()
             #interactive_print(new, clear_line=True)
 
     def play_folder(self):
