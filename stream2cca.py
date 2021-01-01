@@ -69,6 +69,14 @@ logging_ch.setLevel(logging.WARN)
 # helpers
 #
 
+#
+def mmss_to_secs(mmss):
+    """ Convert mm:ss time to seconds
+    """
+    assert ":" in mmss
+    mm, ss = mmss.split(":")
+    return 60 * int(mm) + int(ss)
+
 # Network port to use
 # 9812 - Unassigned
 #      - https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?&page=117
@@ -94,7 +102,7 @@ def to_min_sec(seconds, resolution="seconds"):
     """ convert floating pt seconds value to mm:ss.xx or mm:ss.x or mm:ss
     """
     if not isinstance(seconds, float):
-        return '--:--'
+        return '-- --'
 
     if resolution == 'seconds':
         seconds += 0.5
@@ -165,7 +173,6 @@ class CcAudioStreamer():  # {
     def __init__(self, cc_device, **kwargs):
         """
         """
-        # TODO: see if we should be calling self.cc.disconnect() at some point
         self.cc = cc_device     # of type pychromecast.Chromecast
         self.cc.wait()
         self.new_media_status_callback = kwargs.get('new_media_status_callback', None)
@@ -178,6 +185,12 @@ class CcAudioStreamer():  # {
         self.muted = False
         self.pre_muted_vol = 0
         self.consecutive_update_status_exceptions = 0
+
+    def disconnect(self):
+        """
+        """
+        assert self.cc
+        self.cc.disconnect()
 
     def get_name(self):
         return self.cc.name
@@ -285,7 +298,7 @@ class CcAudioStreamer():  # {
         if posixPath_list:
             filelist = [str(pp) for pp in posixPath_list]
             random.shuffle(filelist)
-            print("Playing folder (%s) with %d files" % (play_folder, len(filelist)))
+            print("\rPlaying folder (%s) with %d files" % (play_folder, len(filelist)))
 
             self.play_list(filelist)
         else:
@@ -485,7 +498,7 @@ class CcAudioStreamer():  # {
             except (pychromecast.error.UnsupportedNamespace, pychromecast.error.NotConnected) as error:
                 logger.warning("Handled exception from: self.mc.update_status()!: %d" % self.consecutive_update_status_exceptions)
                 logger.warning("  %s" % error)
-                track_info = ("artist?", "title?", "album?", "cur_time?", "duration?")
+                track_info = ("", "", "", "", "")  # artist, title, album, cur_time, duration
                 if self.consecutive_update_status_exceptions == 0:
                     self.update_status_exceptions_start_time = datetime.datetime.now()
                 else:
@@ -499,11 +512,11 @@ class CcAudioStreamer():  # {
                 self.consecutive_update_status_exceptions += 1
             else:
                 artist = self.mc.status.artist
-                artist = "??" if artist is None else artist
+                artist = "" if artist is None else artist
                 title = self.mc.status.title
-                title = "??" if title is None else title
+                title = "" if title is None else title
                 album = self.mc.status.album_name
-                album = "??" if album is None else album
+                album = "" if album is None else album
                 track_info = (artist, title, album,
                     to_min_sec(self.mc.status.current_time),
                     to_min_sec(self.mc.status.duration))
@@ -695,15 +708,15 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 - artist
                 - title
                 - album
-                - current_time ("--:--")
-                - duration ("--:--")
+                - current_time ("-- --")
+                - duration ("-- --")
                 - paused ("1")
             """
             statuses = thePlayer.get_status()
             try:
                 status = "\n".join(statuses)
             except TypeError:
-                status = "\n".join(["??"]*7)
+                status = "\n".join([""]*7)
             bstatus = status.encode()
             self.send_header("Content-Length", str(len(bstatus)))
             self.end_headers()
@@ -870,6 +883,7 @@ class InteractivePlayer():  # {
 
     def _main_loop(self):  # {
         with NonBlockingConsole() as nbc:  # {
+            title_prev = None
             while True:  # {
                 # display a status leader
                 _clear_line2()
@@ -911,7 +925,27 @@ class InteractivePlayer():  # {
                         DISCONNECTED_CH = "\u2716"  # ✖
                         status = "%s: %s " % (device, DISCONNECTED_CH)
                 status += ">"
-                print("\r%s " % status, end='')
+                if (title != title_prev) and (title):
+                    # print on new line when get new track
+                    new_track = ">>> New Track: %s - %s (%s) [%s]" % (artist, title, album, duration)
+                    print(new_track)
+                    logger.info(new_track)
+                    title_prev = title
+                    prev_current_s = None
+                else:
+                    final_3s = False
+                    # print on new line when track is on its last 3 seconds
+                    if (":" in duration) and (":" in current_time):
+                        duration_s = mmss_to_secs(duration)
+                        current_s = mmss_to_secs(current_time)
+                        if duration_s - current_s < 3:
+                            final_3s = True
+
+                    if final_3s and (prev_current_s != current_s):
+                        prev_current_s = current_s
+                        print("\r%s " % status)
+                    else:
+                        print("\r%s " % status, end='')
 
                 # Throttle the polling loop so python doesn't consume 100% of a core
                 # - running @ 60Hz reduces CPU to < 1% on Mac but ~12% on RPi4
@@ -1028,6 +1062,8 @@ class InteractivePlayer():  # {
                 track_info = self.cas.get_track_info()
                 if track_info is None:
                     print("Disconnected from device:")
+                    self.cas.disconnect()
+                    self.cas = None
                     self.connected = False
                 else:
                     if track_info != "":
