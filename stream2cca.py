@@ -20,6 +20,7 @@ import pathlib
 import pychromecast     # pip install PyChromecast==7.2.0  ## Other versions may work also
 import random
 import socket
+import subprocess
 import threading
 import time
 import urllib
@@ -69,13 +70,20 @@ logging_ch.setLevel(logging.WARN)
 # helpers
 #
 
-#
 def mmss_to_secs(mmss):
     """ Convert mm:ss time to seconds
     """
     assert ":" in mmss
     mm, ss = mmss.split(":")
     return 60 * int(mm) + int(ss)
+
+def get_get_hash():
+    """
+    """
+    h = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'])   # this is bytes object
+    return h.decode().strip()
+
+
 
 # Network port to use
 # 9812 - Unassigned
@@ -1120,6 +1128,8 @@ class InteractivePlayer():  # {
 
         divider = "-"*66
         print(divider)
+        git_hash = get_get_hash()
+        print( "(%s: %s)\n" % (os.path.basename(__file__), git_hash) )
         print("Chromecast Audio Devices and Cast Groups:")
         if len(cc_key_mapping) > 0:
             for k, cc in cc_key_mapping.items():
