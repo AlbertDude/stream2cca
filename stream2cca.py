@@ -642,8 +642,9 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
                 #   Projects/stream2cca/stream2cca.py ZPL
                 super().__init__(*args, **kwargs)
         except BrokenPipeError as error:
-            logger.warning("Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!")
+            logger.warning("Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!  -- disconnecting")
             logger.warning("  %s" % error)
+            thePlayer.disconnect()
 
 
     def log_message(self, format, *args):
@@ -673,7 +674,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             # rather than os.path.join()
             self.path = '/' + WEB_PAGE_REL_PATH + self.path
 
-        # Occasionally get this exception
+        # Occasionally get these exceptions
         """
         File "./stream2cca.py", line 571, in do_GET
         return super().do_GET()
@@ -687,11 +688,23 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         self._sock.sendall(b)
         ConnectionResetError: [Errno 104] Connection reset by peer
         ----------------------------------------
+        File "stream2cca.py", line 680, in do_GET
+        File "/usr/lib/python3.7/http/server.py", line 653, in do_GET
+        File "/usr/lib/python3.7/http/server.py", line 653, in do_GET
+        self.copyfile(f, self.wfile)
+        File "/usr/lib/python3.7/http/server.py", line 844, in copyfile
+        shutil.copyfileobj(source, outputfile)
+        File "/usr/lib/python3.7/shutil.py", line 82, in copyfileobj
+        fdst.write(buf)
+        File "/usr/lib/python3.7/socketserver.py", line 799, in write
+        self._sock.sendall(b)
+        TimeoutError: [Errno 110] Connection timed out
+        ----------------------------------------
         """
 
         try:
             super().do_GET()
-        except ConnectionResetError as error:
+        except (ConnectionResetError, TimeoutError) as error:
             logger.warning("Handled exception from: super().do_GET()!")
             logger.warning("  %s" % error)
 
@@ -861,6 +874,10 @@ class InteractivePlayer():  # {
         self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
         self.connected = True   # Assume connection OK
 
+    def disconnect(self):
+        if self.cas:
+            self.cas.disconnect()
+
     def start(self):
         self._start_server()
         self._show_key_mappings(self.cc_key_mapping)
@@ -927,21 +944,26 @@ class InteractivePlayer():  # {
                 status += ">"
                 if (title != title_prev) and (title):
                     # print on new line when get new track
-                    new_track = ">>> New Track: %s - %s (%s) [%s]" % (artist, title, album, duration)
+                    leader_trailer_len = len(device) - 1    # magic number to get artist/title/etc. aligned
+                    trailer_len = leader_trailer_len // 2   # floor division
+                    leader_len = leader_trailer_len - trailer_len
+                    leader = "<" * leader_len 
+                    trailer = ">" * trailer_len 
+                    new_track = "%s New Track %s %s - %s (%s)       [%s]" % (leader, trailer, artist, title, album, duration)
                     print(new_track)
                     logger.info(new_track)
                     title_prev = title
                     prev_current_s = None
                 else:
-                    final_3s = False
-                    # print on new line when track is on its last 3 seconds
+                    final_2s = False
+                    # print on new line when track is on its last 2 seconds
                     if (":" in duration) and (":" in current_time):
                         duration_s = mmss_to_secs(duration)
                         current_s = mmss_to_secs(current_time)
-                        if duration_s - current_s < 3:
-                            final_3s = True
+                        if duration_s - current_s < 2:
+                            final_2s = True
 
-                    if final_3s and (prev_current_s != current_s):
+                    if final_2s and (prev_current_s != current_s):
                         prev_current_s = current_s
                         print("\r%s " % status)
                     else:
@@ -960,7 +982,9 @@ class InteractivePlayer():  # {
                 # quit: q   ##, <ESC>
                 #if k == chr(27) or k == 'q':   ## testing for <ESC> also triggered by cursor keys
                 if k == 'q':
+                    # TODO: this should probably tell CC to stop
                     self.my_server.shutdown()
+                    self.disconnect()   # TODO: not sure if this needed or if it will cause problems
                     interactive_print("Quitting")
                     break
 
@@ -1062,7 +1086,7 @@ class InteractivePlayer():  # {
                 track_info = self.cas.get_track_info()
                 if track_info is None:
                     print("Disconnected from device:")
-                    self.cas.disconnect()
+                    self.disconnect()
                     self.cas = None
                     self.connected = False
                 else:
