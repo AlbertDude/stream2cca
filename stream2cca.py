@@ -875,10 +875,12 @@ class InteractivePlayer():  # {
 
     def set_device(self, device_key):
         cc  = self.cc_key_mapping[device_key]
+        # TODO: maybe remove this already connected check? and instead do a disconnect and connect??
         if self.cas and (self.cas.get_name() == cc.name):
             print("Already connected to:", cc.name, "(%s)"%cc.model_name)
             return
         print("Selected:", cc.name, "(%s)"%cc.model_name)
+        self.disconnect()
         self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
         self.connected = True   # Assume connection OK
 
