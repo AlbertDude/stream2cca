@@ -503,7 +503,9 @@ class CcAudioStreamer():  # {
         if self.state == 'PLAYING' or self.state == 'PAUSED':
             try:
                 self.mc.update_status()
-            except (pychromecast.error.UnsupportedNamespace, pychromecast.error.NotConnected) as error:
+            except (pychromecast.error.UnsupportedNamespace, 
+                    pychromecast.error.NotConnected,
+                    pychromecast.error.ControllerNotRegistered) as error:
                 logger.warning("Handled exception from: self.mc.update_status()!: %d" % self.consecutive_update_status_exceptions)
                 logger.warning("  %s" % error)
                 track_info = ("", "", "", "", "")  # artist, title, album, cur_time, duration
@@ -800,7 +802,7 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             self.send_response(400)  # 400 Bad Request
             self.end_headers()
             logger.error("Unknown POST command: %s" % content)
-    # }
+    # } def do_POST(self):
 # } ## class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
@@ -824,7 +826,7 @@ class MyThreadingTCPServer(socketserver.ThreadingTCPServer):  # {
 # }
 
 
-thePlayer = None    # global singleton
+thePlayer = None            # global singleton
 
 class InteractivePlayer():  # {
     """ Interactive Playlist player
@@ -837,6 +839,7 @@ class InteractivePlayer():  # {
         self.playlist_folder = playlist_folder
         self.cas = None     # CC Audio Streamer
         self.connected = False
+        self.lock = threading.Lock()  # mutex for thread-safety
 
         self._get_devices()
 
@@ -850,23 +853,24 @@ class InteractivePlayer():  # {
                   - groups descend from 0 in alphabetic order
 
         """
-        self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
+        with self.lock:
+            self.cc_audios, self.cc_groups = CcAudioStreamer.get_devices()
 
-        # sort the lists alphabetically by name
-        self.cc_audios.sort(key=lambda x: x.name)
-        self.cc_groups.sort(key=lambda x: x.name)
+            # sort the lists alphabetically by name
+            self.cc_audios.sort(key=lambda x: x.name)
+            self.cc_groups.sort(key=lambda x: x.name)
 
-        # current mapping scheme has a limit of 10 devices and groups
-        MAX_LIMIT = 10
-        assert len(self.cc_audios) + len(self.cc_groups) <= MAX_LIMIT, "Update code to handle more than 10 CCA devices and groups"
+            # current mapping scheme has a limit of 10 devices and groups
+            MAX_LIMIT = 10
+            assert len(self.cc_audios) + len(self.cc_groups) <= MAX_LIMIT, "Update code to handle more than 10 CCA devices and groups"
 
-        # NOTE: this code will fail for more than 10 devices+groups
-        keys = [str((i+1)%10) for i in range(10)]   # ['1', ..., '9', '0']
-        self.cc_key_mapping = dict(zip(keys, self.cc_audios))
-        self.cc_key_mapping.update(dict(zip(reversed(keys), self.cc_groups)))
+            # NOTE: this code will fail for more than 10 devices+groups
+            keys = [str((i+1)%10) for i in range(10)]   # ['1', ..., '9', '0']
+            self.cc_key_mapping = dict(zip(keys, self.cc_audios))
+            self.cc_key_mapping.update(dict(zip(reversed(keys), self.cc_groups)))
 
-        #print("LEN", len(self.cc_key_mapping))
-        #print(self.cc_key_mapping)
+            #print("LEN", len(self.cc_key_mapping))
+            #print(self.cc_key_mapping)
 
     def scan_devices(self):
         self._get_devices()
@@ -881,8 +885,10 @@ class InteractivePlayer():  # {
             return
         print("Selected:", cc.name, "(%s)"%cc.model_name)
         self.disconnect()
-        self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
-        self.connected = True   # Assume connection OK
+        with self.lock:
+            self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
+#TODO: should be OK to remove this since self.connected is set True in the callback
+#           self.connected = True   # Assume connection OK
 
     def disconnect(self):
         if self.cas:
@@ -895,18 +901,19 @@ class InteractivePlayer():  # {
         logger.warning("Exitted _main_loop")    # Debugging slow quitting
 
     def _start_server(self):
-        self.my_server = MyThreadingTCPServer(("", PORT), MyHTTPRequestHandler)
-        simple_threaded_server(self.my_server)
-        logger.info("Server started")
-        print("Server started")
+        with self.lock:
+            self.my_server = MyThreadingTCPServer(("", PORT), MyHTTPRequestHandler)
+            simple_threaded_server(self.my_server)
+            logger.info("Server started")
+            print("Server started")
 
-    def _new_media_status_callback(self):  # {
+    def _new_media_status_callback(self):
         """ callback fcn to hook into CAS's new_media_status
             register this method wth CAS so that cas.new_media_status() calls this fcn
         """
         # cas.new_media_status() getting called means we're connected to the ChromeCast
-        self.connected = True
-    # }
+        with self.lock:
+            self.connected = True
 
     def _main_loop(self):  # {
         with NonBlockingConsole() as nbc:  # {
@@ -1029,42 +1036,49 @@ class InteractivePlayer():  # {
                 # unused:
                 else:
                     print('Unmapped key pressed:', k)
-            # }
-        # }
-    # }
+            # } while True:
+        # } with NonBlockingConsole() as nbc: 
+    # } def _main_loop(self): 
 
     def volume_toggle_mute(self):
-        if self.cas:
-            self.cas.vol_toggle_mute()
+        with self.lock:
+            if self.cas:
+                self.cas.vol_toggle_mute()
 
     def volume_up(self):
-        if self.cas:
-            prev, new = self.cas.vol_up(0.05)
-            #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
+        with self.lock:
+            if self.cas:
+                prev, new = self.cas.vol_up(0.05)
+                #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
     def volume_down(self):
-        if self.cas:
-            prev, new = self.cas.vol_down(0.05)
-            #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
+        with self.lock:
+            if self.cas:
+                prev, new = self.cas.vol_down(0.05)
+                #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
     def play_pause_resume(self):
-        if self.cas:
-            prev, new = self.cas.play_pause_resume()
-            #interactive_print(new, clear_line=True)
+        with self.lock:
+            if self.cas:
+                prev, new = self.cas.play_pause_resume()
+                #interactive_print(new, clear_line=True)
 
     def play_folder(self):
-        if self.cas:
-            self.cas.play_folder(self.playlist_folder)
+        with self.lock:
+            if self.cas:
+                self.cas.play_folder(self.playlist_folder)
 
     def next_track(self):
-        if self.cas:
-            self.cas.next_track()
-            #interactive_print("Next track")
+        with self.lock:
+            if self.cas:
+                self.cas.next_track()
+                #interactive_print("Next track")
 
     def prev_track(self):
-        if self.cas:
-            self.cas.prev_track()
-            #interactive_print("Prev track")
+        with self.lock:
+            if self.cas:
+                self.cas.prev_track()
+                #interactive_print("Prev track")
 
     def get_status(self):  # {
         """ returns status as 8-element tuple
@@ -1078,44 +1092,47 @@ class InteractivePlayer():  # {
         current_time = ""
         duration = ""
         paused = ""
-        if self.cas:
-            device = self.cas.get_name()
-            if self.connected:  # {
+        with self.lock:  # {
+            if self.cas:  # {
+                device = self.cas.get_name()
+                if self.connected:  # {
 
-                muted, pre_muted_vol = self.cas.get_muted()
-                # unicode speaker characters
-                SPEAKER = "\U0001F508"
-                SPEAKER_1 = "\U0001F509"
-                SPEAKER_3 = "\U0001F50A"
-                SPEAKER_MUTE = "\U0001F507"
-                if muted:
-                    volume = SPEAKER_MUTE + "%03d" % int(100 * pre_muted_vol + 0.5)
-                else:
-                    volume = SPEAKER_3 + "%03d" % int(100 * self.cas.get_vol() + 0.5)
-
-                track_info = self.cas.get_track_info()
-                if track_info is None:
-                    print("Disconnected from device:")
-                    self.disconnect()
-                    self.cas = None
-                    self.connected = False
-                else:
-                    if track_info != "":
-                        artist, title, album, current_time, duration = track_info
-    #                   track_status = "%s - %s (%s)" % (artist, title, album)
-    #                   playback_status = "%s/%s " % (current_time, duration)
-
-                try:
-                    if self.cas.get_paused():
-                        paused = "1"
+                    muted, pre_muted_vol = self.cas.get_muted()
+                    # unicode speaker characters
+                    SPEAKER = "\U0001F508"
+                    SPEAKER_1 = "\U0001F509"
+                    SPEAKER_3 = "\U0001F50A"
+                    SPEAKER_MUTE = "\U0001F507"
+                    if muted:
+                        volume = SPEAKER_MUTE + "%03d" % int(100 * pre_muted_vol + 0.5)
                     else:
-                        paused = "0"
-                except AttributeError:
-                    # think this can occur if self.cas happens to die in the midst
-                    pass
+                        volume = SPEAKER_3 + "%03d" % int(100 * self.cas.get_vol() + 0.5)
+
+                    track_info = self.cas.get_track_info()
+                    if track_info is None:
+                        print("Disconnected from device:")
+                        self.disconnect()
+                        self.cas = None
+                        self.connected = False
+                    else:
+                        if track_info != "":
+                            artist, title, album, current_time, duration = track_info
+        #                   track_status = "%s - %s (%s)" % (artist, title, album)
+        #                   playback_status = "%s/%s " % (current_time, duration)
+
+                    try:
+                        if self.cas.get_paused():
+                            paused = "1"
+                        else:
+                            paused = "0"
+                    except AttributeError:
+                        # think this can occur if self.cas happens to die in the midst
+                        pass
+                # }
             # }
 
-        connected = "1" if self.connected else "0"
+            connected = "1" if self.connected else "0"
+        # }
         return connected, device, volume, artist, title, album, current_time, duration, paused
     # }
 
