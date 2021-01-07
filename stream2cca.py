@@ -665,7 +665,12 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
         """ HACKISH override so that I can insert my own headers
         """
         self.send_my_headers()
-        super().end_headers()
+        try:
+            super().end_headers()
+        except ConnectionResetError as error:
+            logger.warning("Handled exception from: super().end_headers()!")
+            logger.warning("  %s" % error)
+            thePlayer.disconnect()
 
     def send_my_headers(self):
         """ my specific headers
@@ -892,6 +897,7 @@ class InteractivePlayer():  # {
 
     def disconnect(self):
         if self.cas:
+            logger.warning("InteractivePlayer Disconnecting...")
             self.cas.disconnect()
 
     def start(self):
