@@ -2,6 +2,11 @@
 """
 stream audio to Chromecast Audio
 TODO:
+    - handle connection-state in addition to play-state
+      - this so can connect to device and observe media playback sourced from another device
+        - without it looking like we're doing the playing, 
+        - rather make clear that we're idle and merely observing the playing that's going on and
+          provide the ability to take over via "play playlist" button
     - investigate SEGMENTATION FAULT
     - continue using/testing:
         - ability to select available devices from web-i/f
@@ -183,7 +188,7 @@ class CcAudioStreamer():  # {
         """
         self.cc = cc_device     # of type pychromecast.Chromecast
         self.cc.wait()
-        self.new_media_status_callback = kwargs.get('new_media_status_callback', None)
+        self.new_media_status_callback = kwargs.get('new_media_status_callback', None)  # additional user-specified new_media_status callback
         self.mc = None
         self.state = 'UNKNOWN'
         self.prev_playing_interrupted = datetime.datetime.now()
@@ -231,7 +236,7 @@ class CcAudioStreamer():  # {
 
     def new_media_status(self, status):  # {
         """ status listener/callback implementation
-            this method is called by media controller
+            this method is called by media controller for every call to: self.mc.update_status()
             - it is registered via the call: self.mc.register_status_listener(self)
         """
 
@@ -844,7 +849,7 @@ class InteractivePlayer():  # {
         self.playlist_folder = playlist_folder
         self.cas = None     # CC Audio Streamer
         self.connected = False
-        self.lock = threading.Lock()  # mutex for thread-safety
+        self.lock = threading.RLock()  # mutex for thread-safety
 
         self._get_devices()
 
@@ -883,17 +888,24 @@ class InteractivePlayer():  # {
         return self.cc_key_mapping
 
     def set_device(self, device_key):
-        cc  = self.cc_key_mapping[device_key]
-        # TODO: maybe remove this already connected check? and instead do a disconnect and connect??
-        if self.cas and (self.cas.get_name() == cc.name):
-            print("Already connected to:", cc.name, "(%s)"%cc.model_name)
-            return
-        print("Selected:", cc.name, "(%s)"%cc.model_name)
-        self.disconnect()
         with self.lock:
+            cc  = self.cc_key_mapping[device_key]
+            # TODO: maybe remove this already connected check? and instead do a disconnect and connect??
+            if self.cas and (self.cas.get_name() == cc.name):
+                print("Already connected to:", cc.name, "(%s)"%cc.model_name)
+                return
+            print("Selected:", cc.name, "(%s)"%cc.model_name)
+            self.disconnect()
+            logger.info("Instantiating self.cas w/ CcAudioStreamer instance -- should get callback..")
             self.cas = CcAudioStreamer(cc, new_media_status_callback=self._new_media_status_callback)
-#TODO: should be OK to remove this since self.connected is set True in the callback
-#           self.connected = True   # Assume connection OK
+# TODO: should be OK to remove this since self.connected is set True in the callback
+            # TODO: Operation should account for both connection-state and playing-state
+            # if we set .connected = True here, we can monitor anything that is already playing on the device
+            # - this is arguably a desirable feature, however, we should distinguish this
+            # observation-state from a playing-state
+            # - currently will incorrectly think it's in playing-state just because the device is
+            # playing (content driven by another device)
+            self.connected = True   # Assume connection OK
 
     def disconnect(self):
         if self.cas:
@@ -916,10 +928,17 @@ class InteractivePlayer():  # {
     def _new_media_status_callback(self):
         """ callback fcn to hook into CAS's new_media_status
             register this method wth CAS so that cas.new_media_status() calls this fcn
+
+            - from this class, the call that triggers this callback is
+                get_status():   # which in turn calls...
+                    self.cas.get_track_info()   # which in turn calls...
+                        self.mc.update_status()
+            - in practice, this happens very frequently, approx. every 40 ms
         """
         # cas.new_media_status() getting called means we're connected to the ChromeCast
-        with self.lock:
-            self.connected = True
+        if not self.connected:
+            with self.lock:
+                self.connected = True
 
     def _main_loop(self):  # {
         with NonBlockingConsole() as nbc:  # {
@@ -1102,7 +1121,6 @@ class InteractivePlayer():  # {
             if self.cas:  # {
                 device = self.cas.get_name()
                 if self.connected:  # {
-
                     muted, pre_muted_vol = self.cas.get_muted()
                     # unicode speaker characters
                     SPEAKER = "\U0001F508"
