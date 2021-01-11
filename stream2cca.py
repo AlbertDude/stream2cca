@@ -849,8 +849,8 @@ class InteractivePlayer():  # {
         self.playlist_folder = playlist_folder
         self.cas = None     # CC Audio Streamer
         self.connected = False
+        self.vol_step = 0.05
         self.lock = threading.RLock()  # mutex for thread-safety
-
         self._get_devices()
 
     def _get_devices(self):
@@ -1070,16 +1070,34 @@ class InteractivePlayer():  # {
             if self.cas:
                 self.cas.vol_toggle_mute()
 
+    def _update_vol_step(self, cur_vol):
+        """ provide dynamic volume step, with smaller steps at low-volume
+            V >= .25   =>  .05 
+            V <  .25       .03 
+            V <  .15       .02 
+            V <  .05       .01 
+        """
+        if cur_vol >= .25:
+            self.vol_step = .05
+        elif cur_vol < .05:
+            self.vol_step = .01
+        elif cur_vol < .15:
+            self.vol_step = .02
+        else:
+            self.vol_step = .03
+
     def volume_up(self):
         with self.lock:
             if self.cas:
-                prev, new = self.cas.vol_up(0.05)
+                prev, new = self.cas.vol_up(self.vol_step)
+                self._update_vol_step(new)
                 #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
     def volume_down(self):
         with self.lock:
             if self.cas:
-                prev, new = self.cas.vol_down(0.05)
+                prev, new = self.cas.vol_down(self.vol_step)
+                self._update_vol_step(new)
                 #interactive_print("Vol: %.2f -> %.2f" % (prev, new), clear_line=True)
 
     def play_pause_resume(self):
