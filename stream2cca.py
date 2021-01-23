@@ -665,18 +665,18 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):  # {
             # presumably if just ignore, just means that we drop the one http request?
             # and would avoid all the exceptions coming from self.mc.update_status()?
             # Seen this a couple of times:
-"""
-01/17 22:30:30.488:INFO:__main__: <<<<< New Track >>>> Kings Of Leon - Revelry (Only By The Night)       [03:22]
-01/17 22:33:37.962:WARNING:__main__: Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!  -- disconnecting
-01/17 22:33:37.962:WARNING:__main__:   [Errno 32] Broken pipe
-01/17 22:33:37.963:WARNING:__main__: InteractivePlayer Disconnecting...
-01/17 22:33:37.970:WARNING:__main__: Handled exception from: self.mc.update_status()!: 0
-01/17 22:33:37.970:WARNING:__main__:   Trying to use the controller without it being registered with a Cast object.
-... whole slew of these
-01/17 22:33:41.997:WARNING:__main__:   Trying to use the controller without it being registered with a Cast object.
-01/17 22:33:41.997:ERROR:__main__: Got 82 consecutive update status exceptions over 4 seconds, disconnecting..
-01/17 22:33:41.998:WARNING:__main__: InteractivePlayer Disconnecting...
-"""
+            """
+            01/17 22:30:30.488:INFO:__main__: <<<<< New Track >>>> Kings Of Leon - Revelry (Only By The Night)       [03:22]
+            01/17 22:33:37.962:WARNING:__main__: Handled exception from: http.server.SimpleHTTPRequestHandler.__init__()!  -- disconnecting
+            01/17 22:33:37.962:WARNING:__main__:   [Errno 32] Broken pipe
+            01/17 22:33:37.963:WARNING:__main__: InteractivePlayer Disconnecting...
+            01/17 22:33:37.970:WARNING:__main__: Handled exception from: self.mc.update_status()!: 0
+            01/17 22:33:37.970:WARNING:__main__:   Trying to use the controller without it being registered with a Cast object.
+            ... whole slew of these
+            01/17 22:33:41.997:WARNING:__main__:   Trying to use the controller without it being registered with a Cast object.
+            01/17 22:33:41.997:ERROR:__main__: Got 82 consecutive update status exceptions over 4 seconds, disconnecting..
+            01/17 22:33:41.998:WARNING:__main__: InteractivePlayer Disconnecting...
+            """
 
 
     def log_message(self, format, *args):
