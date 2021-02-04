@@ -2,16 +2,16 @@
 """
 stream audio to Chromecast Audio
 TODO:
+    - investigate SEGMENTATION FAULT
     - handle connection-state in addition to play-state
       - this so can connect to device and observe media playback sourced from another device
         - without it looking like we're doing the playing, 
         - rather make clear that we're idle and merely observing the playing that's going on and
           provide the ability to take over via "play playlist" button
-    - investigate SEGMENTATION FAULT
-    - continue using/testing:
-        - ability to select available devices from web-i/f
-          - seems working, further testing...
-        - if device not playing, make the toggle_pause button a play folder button
+    - reshuffle at end of playlist (rather than playing it again)
+      - see impl. of incr_playlist_index()
+        - reshuffle and reset index to 0
+    - incorporate lyrics?, album info?
 """
 
 
@@ -925,9 +925,10 @@ class InteractivePlayer():  # {
             self.connected = True   # Assume connection OK
 
     def disconnect(self):
-        if self.cas:
-            logger.warning("InteractivePlayer Disconnecting...")
-            self.cas.disconnect()
+        with self.lock:
+            if self.cas:
+                logger.warning("InteractivePlayer Disconnecting...")
+                self.cas.disconnect()
 
     def start(self):
         self._start_server()
@@ -953,8 +954,8 @@ class InteractivePlayer():  # {
             - in practice, this happens very frequently, approx. every 40 ms
         """
         # cas.new_media_status() getting called means we're connected to the ChromeCast
-        if not self.connected:
-            with self.lock:
+        with self.lock:
+            if not self.connected:
                 self.connected = True
 
     def _main_loop(self):  # {
@@ -1094,14 +1095,15 @@ class InteractivePlayer():  # {
             V <  .15       .02 
             V <  .05       .01 
         """
-        if cur_vol >= .25:
-            self.vol_step = .05
-        elif cur_vol < .05:
-            self.vol_step = .01
-        elif cur_vol < .15:
-            self.vol_step = .02
-        else:
-            self.vol_step = .03
+        with self.lock:
+            if cur_vol >= .25:
+                self.vol_step = .05
+            elif cur_vol < .05:
+                self.vol_step = .01
+            elif cur_vol < .15:
+                self.vol_step = .02
+            else:
+                self.vol_step = .03
 
     def volume_up(self):
         with self.lock:
