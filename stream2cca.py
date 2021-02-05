@@ -954,8 +954,8 @@ class InteractivePlayer():  # {
             - in practice, this happens very frequently, approx. every 40 ms
         """
         # cas.new_media_status() getting called means we're connected to the ChromeCast
-        with self.lock:
-            if not self.connected:
+        if not self.connected:
+            with self.lock:  # NOTE: putting lock before the connected check results in deadlocks when changing devices
                 self.connected = True
 
     def _main_loop(self):  # {
