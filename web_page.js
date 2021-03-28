@@ -178,7 +178,7 @@ function get_status(){
             }
             else {
                 DISCONNECTED_CH = "\u2716"; // ✖
-                line0 = device + " " + DISCONNECTED_CH;
+                line0 = device + " " + DISCONNECTED_CH + " Disconnected. Click to Scan Devices " + DISCONNECTED_CH;
             }
             document.getElementById('status0').innerHTML = line0;
 
