@@ -985,7 +985,9 @@ class InteractivePlayer():  # {
                         STOP_CH  = "\u25a0" # ■
                         PAUSE_CH = "\u2016" # ‖
 
-                        status = "%s: %s: " % (device, volume)
+                        status = ""
+                        status += str(datetime.datetime.now().strftime('%m/%d %H:%M:%S.%f:'))
+                        status += "%s: %s: " % (device, volume)
                         if artist == "" and title == "" and album == "" and current_time == "" and duration == "":
                             status += "%s " % STOP_CH
                         else:
@@ -1009,21 +1011,24 @@ class InteractivePlayer():  # {
                     leader_len = leader_trailer_len - trailer_len
                     leader = "<" * leader_len 
                     trailer = ">" * trailer_len 
-                    new_track = "%s New Track %s %s - %s (%s)       [%s]" % (leader, trailer, artist, title, album, duration)
+                    new_track = ""
+                    new_track += str(datetime.datetime.now().strftime('%m/%d %H:%M:%S.%f:'))
+                    new_track += "%s New Track %s %s - %s (%s)       [%s]" % (leader, trailer, artist, title, album, duration)
                     print(new_track)
                     logger.info(new_track)
                     title_prev = title
                     prev_current_s = None
                 else:
-                    final_2s = False
-                    # print on new line when track is on its last 2 seconds
+                    track_ending = False
+                    track_ending_tolerance = 5  # N seconds
+                    # print on new line when track is ending
                     if (":" in duration) and (":" in current_time):
                         duration_s = mmss_to_secs(duration)
                         current_s = mmss_to_secs(current_time)
-                        if duration_s - current_s < 2:
-                            final_2s = True
+                        if duration_s - current_s < track_ending_tolerance:
+                            track_ending = True
 
-                    if final_2s and (prev_current_s != current_s):
+                    if track_ending and (prev_current_s != current_s):
                         prev_current_s = current_s
                         print("\r%s " % status)
                     else:
