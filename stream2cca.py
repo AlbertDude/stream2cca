@@ -3,15 +3,26 @@
 stream audio to Chromecast Audio
 TODO:
     - investigate SEGMENTATION FAULT
-    - handle connection-state in addition to play-state
-      - this so can connect to device and observe media playback sourced from another device
-        - without it looking like we're doing the playing, 
-        - rather make clear that we're idle and merely observing the playing that's going on and
-          provide the ability to take over via "play playlist" button
-    - reshuffle at end of playlist (rather than playing it again)
-      - see impl. of incr_playlist_index()
-        - reshuffle and reset index to 0
-    - incorporate lyrics?, album info?
+    - interactive-player:
+      - when playing and connect to another device, continue existing playlist rather than starting
+        a new playlist
+      - reshuffle at end of playlist (rather than playing it again)
+        - see impl. of incr_playlist_index()
+          - reshuffle and reset index to 0
+      - implement text scroller for the terminal i/f, this so long title/album => long lines don't
+        scroll the display
+      - handle connection-state in addition to play-state
+        - this so can connect to device and observe media playback sourced from another device
+          - without it looking like we're doing the playing, 
+          - rather make clear that we're idle and merely observing the playing that's going on and
+            provide the ability to take over via "play playlist" button
+    - web-page:
+      - should default to the "noise" image and only show "cover" image if playing or paused
+      - make the disconnected status more than "x"
+        - maybe "Disconnected: click to scan for available devices"
+      - is it possible to move web-page from polling the server to have the server push notifications to
+      the web-page?
+      - incorporate lyrics?, album info?
 """
 
 
@@ -22,7 +33,7 @@ import mutagen.easyid3  # pip3 install mutagen
 import mutagen.id3      # pip3 install mutagen
 import os
 import pathlib
-import pychromecast     # pip install PyChromecast==7.2.0  ## Other versions may work also
+import pychromecast     # pip install PyChromecast
 import random
 import socket
 import subprocess
