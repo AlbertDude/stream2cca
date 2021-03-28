@@ -17,9 +17,6 @@ TODO:
           - rather make clear that we're idle and merely observing the playing that's going on and
             provide the ability to take over via "play playlist" button
     - web-page:
-      - should default to the "noise" image and only show "cover" image if playing or paused
-      - make the disconnected status more than "x"
-        - maybe "Disconnected: click to scan for available devices"
       - is it possible to move web-page from polling the server to have the server push notifications to
       the web-page?
       - incorporate lyrics?, album info?
