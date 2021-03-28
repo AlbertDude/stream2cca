@@ -2,7 +2,16 @@
 """
 stream audio to Chromecast Audio
 TODO:
+    - ARGH: seems Mac python3 env is busted (I think due to brew update? - it used to work)
+      - python3 points to usr/bin/python3 which is 3.8.2
+      - pip3 is for /usr/local/lib/python3.9/
+        - pychromecast, mutagen, etc. installed for 3.9
+      - and trying to work with pip in the 3.8.2 env gives this error:
+ERROR: Could not install packages due to an EnvironmentError: [Errno 13] Permission denied: 'RECORD'
+Consider using the `--user` option or check the permissions.
+
     - investigate SEGMENTATION FAULT
+        - getting "killed" failures on RPI3 -- looks like out of memory -- due to slow memory leak?
     - interactive-player:
       - when playing and connect to another device, continue existing playlist rather than starting
         a new playlist
