@@ -1031,7 +1031,8 @@ class InteractivePlayer():  # {
                         PAUSE_CH = "\u2016" # ‖
 
                         status = ""
-                        status += str(datetime.datetime.now().strftime('%m/%d %H:%M:%S.%f:'))
+                        now = datetime.datetime.now()
+                        status += str(now.strftime('%m/%d %H:%M:%S')) + '.%03d:'%(round(now.microsecond/1000))
                         status += "%s: %s: " % (device, volume)
                         if artist == "" and title == "" and album == "" and current_time == "" and duration == "":
                             status += "%s " % STOP_CH
@@ -1060,7 +1061,8 @@ class InteractivePlayer():  # {
                     leader = "<" * leader_len 
                     trailer = ">" * trailer_len 
                     new_track = ""
-                    new_track += str(datetime.datetime.now().strftime('%m/%d %H:%M:%S.%f:'))
+                    now = datetime.datetime.now()
+                    new_track += str(now.strftime('%m/%d %H:%M:%S')) + '.%03d:'%(round(now.microsecond/1000))
 
                     # align this line with new scrolling text impl
                     artist_title_album_text = "%s - %s (%s)" % (artist, title, album)
@@ -1074,7 +1076,7 @@ class InteractivePlayer():  # {
                     prev_current_s = None
                 else:
                     track_ending = False
-                    track_ending_tolerance = 5  # N seconds
+                    track_ending_tolerance = 3  # N seconds
                     # print on new line when track is ending
                     if (":" in duration) and (":" in current_time):
                         duration_s = mmss_to_secs(duration)
