@@ -18,8 +18,6 @@ Consider using the `--user` option or check the permissions.
       - reshuffle at end of playlist (rather than playing it again)
         - see impl. of incr_playlist_index()
           - reshuffle and reset index to 0
-      - implement text scroller for the terminal i/f, this so long title/album => long lines don't
-        scroll the display
       - handle connection-state in addition to play-state
         - this so can connect to device and observe media playback sourced from another device
           - without it looking like we're doing the playing, 
@@ -886,6 +884,10 @@ class InteractivePlayer():  # {
         self.vol_step = 0.05
         self.lock = threading.RLock()  # mutex for thread-safety
         self._get_devices()
+        self.scroll_index = 0
+        self.scroll_timestamp = 0   # previous scroll time
+        self.scroll_result = ""
+        self.prev_scroll_text = None
 
     def _get_devices(self):
         """ Gets chromecast audio devices and groups
@@ -975,7 +977,36 @@ class InteractivePlayer():  # {
             with self.lock:  # NOTE: putting lock before the connected check results in deadlocks when changing devices
                 self.connected = True
 
+
+    def _scroll_text(self, text, scroll_len, scroll_interval_ms=1000):
+        if self.prev_scroll_text != text:
+            self.prev_scroll_text = text
+            self.scroll_index = 0
+            self.scroll_timestamp = 0   # previous scroll time
+
+        in_len = len(text)
+        if in_len < scroll_len:
+            return text + " "*(scroll_len-in_len)
+        else:
+            now_ms = time.time_ns() // 1000000
+            if (now_ms-self.scroll_timestamp) > (scroll_interval_ms):
+                padded_text = text + " "*3
+                padded_len = len(padded_text)
+                result = padded_text[self.scroll_index:min(padded_len, self.scroll_index+scroll_len)]
+                out_len = len(result)
+                remaining_len = scroll_len - out_len
+                result += text[0:remaining_len]
+
+                self.scroll_index += 1
+                self.scroll_index %= padded_len
+
+                self.scroll_timestamp = now_ms
+                self.scroll_result = result
+
+            return self.scroll_result
+
     def _main_loop(self):  # {
+        len_artist_title_album_info = 55
         with NonBlockingConsole() as nbc:  # {
             title_prev = None
             while True:  # {
@@ -989,7 +1020,6 @@ class InteractivePlayer():  # {
                     status = "Select device or group:"
                 else:
                     if connected == "1":  # {
-
                         # Ideally would use these from "Misc Technical" but the PLAY doesn't display properly with my default mac font
                         # http://unicode.org/charts/PDF/U2300.pdf
     #                   PLAY_CH = "\u23f5"
@@ -1014,7 +1044,10 @@ class InteractivePlayer():  # {
                                 play_pause_ch = PLAY_CH
                             status += "%s " % play_pause_ch
 
-                            status += "%s - %s (%s): " % (artist, title, album)
+                            # scroll the "artist - title (album)" if it's too long
+                            artist_title_album_text = "%s - %s (%s)" % (artist, title, album)
+                            scrolled_artist_title_album_text = self._scroll_text(artist_title_album_text, len_artist_title_album_info)
+                            status += "%s: " % (scrolled_artist_title_album_text)
                             status += "%s/%s " % (current_time, duration)
                     # }
                     else:
@@ -1030,7 +1063,13 @@ class InteractivePlayer():  # {
                     trailer = ">" * trailer_len 
                     new_track = ""
                     new_track += str(datetime.datetime.now().strftime('%m/%d %H:%M:%S.%f:'))
-                    new_track += "%s New Track %s %s - %s (%s)       [%s]" % (leader, trailer, artist, title, album, duration)
+
+                    # align this line with new scrolling text impl
+                    artist_title_album_text = "%s - %s (%s)" % (artist, title, album)
+                    spacer = " "*( max(0,6+len_artist_title_album_info-len(artist_title_album_text)) )
+
+                    new_track += "%s New Track %s %s %s[%s]" % (leader, trailer, artist_title_album_text, spacer, duration)
+                    #new_track += "%s New Track %s %s - %s (%s)       [%s]" % (leader, trailer, artist, title, album, duration)
                     print(new_track)
                     logger.info(new_track)
                     title_prev = title
