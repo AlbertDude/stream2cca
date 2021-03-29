@@ -15,9 +15,6 @@ Consider using the `--user` option or check the permissions.
     - interactive-player:
       - when playing and connect to another device, continue existing playlist rather than starting
         a new playlist
-      - reshuffle at end of playlist (rather than playing it again)
-        - see impl. of incr_playlist_index()
-          - reshuffle and reset index to 0
       - handle connection-state in addition to play-state
         - this so can connect to device and observe media playback sourced from another device
           - without it looking like we're doing the playing, 
@@ -241,6 +238,7 @@ class CcAudioStreamer():  # {
         if not self.playlist_index is None:
             self.playlist_index += 1
             if self.playlist_index >= len(self.playlist):
+                random.shuffle(self.playlist)
                 self.playlist_index = 0
 
     def decr_playlist_index(self):
