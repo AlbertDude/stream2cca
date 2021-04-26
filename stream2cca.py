@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 """
 stream audio to Chromecast Audio
-TODO:
-    - ARGH: seems Mac python3 env is busted (I think due to brew update? - it used to work)
-      - python3 points to usr/bin/python3 which is 3.8.2
-      - pip3 is for /usr/local/lib/python3.9/
-        - pychromecast, mutagen, etc. installed for 3.9
-      - and trying to work with pip in the 3.8.2 env gives this error:
-ERROR: Could not install packages due to an EnvironmentError: [Errno 13] Permission denied: 'RECORD'
-Consider using the `--user` option or check the permissions.
-
     - investigate SEGMENTATION FAULT
         - getting "killed" failures on RPI3 -- looks like out of memory -- due to slow memory leak?
     - interactive-player:
@@ -25,6 +16,12 @@ Consider using the `--user` option or check the permissions.
           - without it looking like we're doing the playing, 
           - rather make clear that we're idle and merely observing the playing that's going on and
             provide the ability to take over via "play playlist" button
+    - playlist filtering:
+      - filter by:
+        song    - restrict playlist to other versions of the currently playing song
+        album   - restrict playlist to other songs on the same album
+        artist  - restrict playlist to other songs by the same artist
+      - remove filters
     - web-page:
       - is it possible to move web-page from polling the server to have the server push notifications to
       the web-page?
@@ -35,11 +32,11 @@ Consider using the `--user` option or check the permissions.
 import argparse
 import datetime
 import logging
-import mutagen.easyid3  # pip3 install mutagen
-import mutagen.id3      # pip3 install mutagen
+import mutagen.easyid3  # python -m pip install mutagen
+import mutagen.id3      # python -m pip install mutagen
 import os
 import pathlib
-import pychromecast     # pip install PyChromecast
+import pychromecast     # python -m pip install PyChromecast
 import random
 import socket
 import subprocess
@@ -99,12 +96,29 @@ def mmss_to_secs(mmss):
     mm, ss = mmss.split(":")
     return 60 * int(mm) + int(ss)
 
-def get_get_hash():
+def get_git_hash():
     """
     """
     h = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'])   # this is bytes object
-    return h.decode().strip()
+    git_hash = h.decode().strip()
 
+    # detect for modified files with:
+    # > git status -s
+    #  M stream2cca.py
+    # ?? test_server.py
+    # ?? test_threaded_server.py
+    #
+    # in bash shell could pipe to grep: 
+    # > git status -s | grep "^ M"
+    # but within python, would need to spawn subprocess with a shell since "|" is a shell-feature
+    # - so we'll implement the grepping in code here
+    h = subprocess.check_output(['git', 'status', '-s'])   # this is bytes object
+    lines = h.decode().split('\n')
+    for line in lines:
+        if line.startswith(' M'):
+            git_hash += " +" + line
+
+    return git_hash
 
 
 # Network port to use
@@ -210,6 +224,7 @@ class CcAudioStreamer():  # {
         self.state = 'UNKNOWN'
         self.prev_playing_interrupted = datetime.datetime.now()
         self.prev_filename = None
+        self.master_playlist = []
         self.playlist = []
         self.playlist_index = None
         self.muted = False
@@ -337,7 +352,8 @@ class CcAudioStreamer():  # {
     def play_list(self, filelist, verbose_listener=False):
         """
         """
-        self.playlist = filelist
+        self.master_playlist = filelist
+        self.playlist = self.master_playlist
         self.playlist_index = 0
         self.play(self.playlist[self.playlist_index], verbose_listener=verbose_listener)
 
@@ -856,6 +872,10 @@ def simple_threaded_server(server):
     server_thread.start()
     logger.info("Started simple server at port: %d" % PORT)
 
+# TODO: it's looking like this might be the cause of the leak
+# see the referenced SO topic for other techniques at addressing the "already in use" error
+# - e.g.: setting allow_reuse_address = True
+#   https://stackoverflow.com/a/35363839
 class MyThreadingTCPServer(socketserver.ThreadingTCPServer):  # {
     """
     This to address occasional error when quit and restart server:
@@ -1230,7 +1250,7 @@ class InteractivePlayer():  # {
 
         divider = "-"*66
         print(divider)
-        git_hash = get_get_hash()
+        git_hash = get_git_hash()
         print( "(%s: %s)\n" % (os.path.basename(__file__), git_hash) )
         print("Chromecast Audio Devices and Cast Groups:")
         if len(cc_key_mapping) > 0:
