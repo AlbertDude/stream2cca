@@ -127,7 +127,7 @@ function get_status(){
 //          console.log(status_array);
 
             function scroll_text(full_track_status) {
-                extended_track_status = full_track_status + NBSP.repeat(4);
+                extended_track_status = full_track_status + NBSP.repeat(3);
                 len_extended = extended_track_status.length;
                 // first part
                 end_index = Math.min(...[len_extended, this.scroll_index + MAX_LEN]);
@@ -202,25 +202,35 @@ function get_status(){
             // Initialize a static variable for scroll index
             if (typeof this.scroll_index == 'undefined') {
                 this.scroll_index = 0;
+                this.prev_track = "";
             }
 
             track_status = "";
             full_track_status = "";
 
+            var bHasActiveTrack = false;
             if (connected == "1") {
                 // "ARTIST - TITLE (ALBUM)"
                 // Unfortunately: scroller implmentations doesn't like formatted text...
                 // track = BOLD + artist + BOLD_END + " - " + title + ITALIC + " (" + album + ")" + ITALIC_END;
                 track = artist + " - " + title + " (" + album + ")";
+
+                // reset scroll_index when track changes
+                if (track != this.prev_track) {
+                    this.prev_track = track;
+                    this.scroll_index = 0;
+                }
+
                 track_len = artist.length + title.length + album.length + 6;
-                if (track_len > 0) {
-                    full_track_status = track.split(' ').join(NBSP);
-                    if (track_len <= MAX_LEN) {
-                        track_status = full_track_status;
-                    }
-                    else {
-                        track_status = scroll_text(full_track_status);
-                    }
+                full_track_status = track.split(' ').join(NBSP);
+                if (track_len <= MAX_LEN) {
+                    track_status = full_track_status;
+                }
+                else {
+                    track_status = scroll_text(full_track_status);
+                }
+                if (track_len > 6) {
+                    bHasActiveTrack = true;
                 }
             }
             document.getElementById('status1').innerHTML = track_status;
@@ -231,19 +241,24 @@ function get_status(){
             }
 
             if (connected == "1") {
-                // refresh img if track has changed
-                if (this.prev_track_status.localeCompare(full_track_status) != 0) {
-                    // filter out spurious assignments of 'undefined' 
-                    // (not sure why we get these...)
-                    if ("undefined".localeCompare(full_track_status) != 0) {
-                        //console.log("Track status changed to: " + full_track_status)
-                        refresh_img();
-                        this.prev_track_status = full_track_status;
+                if (bHasActiveTrack) {
+                    // refresh img if track has changed
+                    if (this.prev_track_status.localeCompare(full_track_status) != 0) {
+                        // filter out spurious assignments of 'undefined' 
+                        // (not sure why we get these...)
+                        if ("undefined".localeCompare(full_track_status) != 0) {
+                            //console.log("Track status changed to: " + full_track_status)
+                            show_cover_img();
+                            this.prev_track_status = full_track_status;
+                        }
                     }
+                }
+                else {
+                    show_flatline_img();
                 }
             }
             else {
-                disable_img();
+                show_noise_img();
             }
         }
     }
@@ -281,7 +296,8 @@ function scan_devices(){
     }
 }
 
-function refresh_img(){
+// when connected and playing or paused
+function show_cover_img(){
     // append #Date.now() as technique to force reload (avoid cache)
     // - also requires some Cache-Control headers from the server
     // see: https://stackoverflow.com/questions/1077041/refresh-image-with-a-new-one-at-the-same-url
@@ -289,7 +305,14 @@ function refresh_img(){
     document.getElementById('cover_art').style.visibility = 'visible';
 }
 
-function disable_img(){
+// when connected but not playing
+function show_flatline_img(){
+    document.getElementById('cover_art').src="imgs/flatline.png";
+    document.getElementById('cover_art').style.visibility = 'visible';
+}
+
+// when disconnected
+function show_noise_img(){
     //document.getElementById('cover_art').style.visibility = 'hidden';
     document.getElementById('cover_art').src="imgs/noise.jpg";
     document.getElementById('cover_art').style.visibility = 'visible';
