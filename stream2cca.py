@@ -21,6 +21,8 @@ stream audio to Chromecast Audio
       - is it possible to move web-page from polling the server to have the server push notifications to
       the web-page?
       - incorporate lyrics?, album info?
+        - possible lyrics source: genius.com
+            - see this sample project: https://www.reddit.com/r/learnpython/comments/mtwjwy/i_created_an_app_in_python/?%24deep_link=true&correlation_id=e58318b2-2aec-41b3-9091-f009ef1b4d4c&post_fullname=t3_mtwjwy&post_index=1&ref=email_digest&ref_campaign=email_digest&ref_source=email&utm_content=post_title&%243p=e_as&_branch_match_id=800867540720438556
 """
 
 
@@ -319,13 +321,6 @@ class CcAudioStreamer():  # {
         else:
             #self.verbose_logger("Status: Spurious event: .player_state = %s, idle_reason = %s" % (status.player_state, status.idle_reason))
             pass
-
-#           try:
-#               next(self._media)
-#               time.sleep(3)
-#           except StopIteration:
-#               self.cc.quit_app()
-#               self.cc.__del__()
 
         # if caller specified a listener/callback, call that
         if self.new_media_status_callback:
